@@ -13,21 +13,6 @@ servers:
     description: Local server
 
 paths:
-  /certs:
-    get:
-      tags:
-        - GET
-      summary: List all certificates
-      responses:
-        '200':
-          description: A list of certificates
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Certificate'
-
   /certs/{certId}:
     get:
       tags:

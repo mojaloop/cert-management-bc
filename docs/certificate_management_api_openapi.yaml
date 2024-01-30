@@ -13,24 +13,33 @@ servers:
     description: Local server
 
 paths:
-  /certs:
+  /certs/{participantId}:
     get:
       tags:
         - GET
-      summary: List all certificates
+      summary: Get a specific certificate
+      parameters:
+        - name: participantId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         '200':
-          description: A list of certificates
+          description: Details of the certificate
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Certificate'
+                $ref: '#/components/schemas/Certificate'
+        '404':
+          description: Certificate not found
+  /certs:
     post:
       tags:
         - POST
       summary: Store a new certificate
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -46,6 +55,8 @@ paths:
       tags:
         - POST
       summary: Store a new certificate file
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -53,7 +64,7 @@ paths:
             schema:
               type: object
               properties:
-                certId:
+                participantId:
                   type: string
                   description: The ID of the certificate
                 cert:
@@ -66,92 +77,28 @@ paths:
         '400':
           description: Invalid input
 
-  /certs/file/{certId}:
-    put:
+  /certs/{participantId}/approve:
+    post:
       tags:
-        - PUT
-      summary: Update an existing certificate file
+        - POST
+      summary: Approve a certificate
+      security:
+        - bearerAuth: []
       parameters:
-        - name: certId
+        - name: participantId
           in: path
           required: true
           schema:
             type: string
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                cert:
-                  type: string
-                  format: binary
-                  description: The updated certificate file
       responses:
         '200':
-          description: Certificate file updated successfully
+          description: Certificate approved successfully
         '400':
-          description: Invalid input
+          description: Bad request (e.g., missing participantId, trying to approve own certificate)
         '404':
           description: Certificate not found
-
-  /certs/{certId}:
-    get:
-      tags:
-        - GET
-      summary: Get a specific certificate
-      parameters:
-        - name: certId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Details of the certificate
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Certificate'
-        '404':
-          description: Certificate not found
-    put:
-      tags:
-        - PUT
-      summary: Update an existing certificate
-      parameters:
-        - name: certId
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/NewCertificate'
-      responses:
-        '200':
-          description: Certificate updated successfully
-        '404':
-          description: Certificate not found
-    delete:
-      tags:
-        - DELETE
-      summary: Delete a certificate
-      parameters:
-        - name: certId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Certificate deleted successfully
         '500':
-          description: Error deleting certificate
+          description: Error approving certificate
 
 components:
   schemas:
@@ -162,10 +109,14 @@ components:
           type: string
         content:
           type: string
+    securitySchemes:
+      bearerAuth:
+        type: http
+        scheme: bearer
     NewCertificate:
       type: object
       properties:
-        certId:
+        participantId:
           type: string
           example: 'dfsp1'
         cert:
@@ -176,3 +127,6 @@ components:
             BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTIwMDUxNzE5MjY0NVoXDTIxMDUx
             NzE5MjY0NVowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgk
             -----END CERTIFICATE-----
+
+security:
+  - bearerAuth: []
