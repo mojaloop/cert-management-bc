@@ -41,7 +41,10 @@ import {IMessageProducer} from "@mojaloop/platform-shared-lib-messaging-types-li
 import {MLKafkaJsonProducer} from "@mojaloop/platform-shared-lib-nodejs-kafka-client-lib";
 import * as util from "util";
 import {Server} from "net";
+
+import {MongoCertsRepo} from "@mojaloop/cert-management-bc-implementations-lib";
 import {CertificateAggregate} from "@mojaloop/cert-management-bc-domain-lib";
+import {ICertRepo} from "@mojaloop/cert-management-bc-domain-lib";
 
 const APP_NAME = "mcm-external-svc";
 const BC_NAME = "cert-management-bc";
@@ -57,6 +60,10 @@ const KAFKA_LOGS_TOPIC = process.env["KAFKA_LOGS_TOPIC"] || "logs";
 const SERVICE_START_TIMEOUT_MS= (process.env["SERVICE_START_TIMEOUT_MS"] && parseInt(process.env["SERVICE_START_TIMEOUT_MS"])) || 60_000;
 const CERT_DIR = process.env["CERT_DIR"] || path.join(__dirname, "../certs");
 
+const DB_NAME_CERTIFICATES = "certificates";
+
+const MONGO_URL = process.env["MONGO_URL"] || "mongodb://root:mongoDbPas42@localhost:27017/";
+
 const kafkaProducerOptions = {
     kafkaBrokerList: KAFKA_URL
 };
@@ -67,6 +74,7 @@ let globalLogger: ILogger;
 
 export class Service {
     static logger: ILogger;
+    static certsRepo: ICertRepo;
     static app: Express;
     static expressServer: Server;
     static messageProducer: IMessageProducer;
@@ -77,6 +85,7 @@ export class Service {
     static async start(
         logger?: ILogger,
         messageProducer?: IMessageProducer,
+        certsRepo?: ICertRepo,
         // configProvider?: IConfigProvider,
     ): Promise<void> {
         console.log(`Service starting with PID: ${process.pid}`);
@@ -105,6 +114,13 @@ export class Service {
         }
         globalLogger = this.logger = logger;
 
+        if(!certsRepo){
+			certsRepo = new MongoCertsRepo(this.logger, MONGO_URL, DB_NAME_CERTIFICATES);
+            await certsRepo.init();
+            this.logger.info("MongoDB Certificates Repo Initialized");
+		}
+
+        this.certsRepo = certsRepo;
         if (!messageProducer) {
             const producerLogger = logger.createChild("producerLogger");
             producerLogger.setLogLevel(LogLevel.INFO);
@@ -117,10 +133,11 @@ export class Service {
             this.configClient,
             this.messageProducer,
             this.logger,
+            this.certsRepo,
             CERT_DIR
         );
 
-        await this.certificateAggregate.init();
+        // await this.certificateAggregate.init();
 
 
         await this.setupExpress();
@@ -135,7 +152,7 @@ export class Service {
             this.app.use(express.json()); // for parsing application/json
             this.app.use(express.urlencoded({extended: true})); // for parsing application/x-www-form-urlencoded
 
-            const routes = new ExpressRoutes(this.configClient, this.certificateAggregate, this.logger);
+            const routes = new ExpressRoutes(this.configClient, this.certificateAggregate, this.logger, this.certsRepo);
 
             // Add health and metrics http routes - before others (to avoid authZ middleware)
             this.app.get("/health", (_req: express.Request, res: express.Response) => {

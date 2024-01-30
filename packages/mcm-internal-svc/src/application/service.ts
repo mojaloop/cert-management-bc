@@ -41,7 +41,10 @@ import {IMessageProducer} from "@mojaloop/platform-shared-lib-messaging-types-li
 import {MLKafkaJsonProducer} from "@mojaloop/platform-shared-lib-nodejs-kafka-client-lib";
 import * as util from "util";
 import {Server} from "net";
-import {CertificateAggregate} from "@mojaloop/cert-management-bc-domain-lib";
+import {CertificateAggregate, ICertRepo} from "@mojaloop/cert-management-bc-domain-lib";
+import {MongoCertsRepo} from "@mojaloop/cert-management-bc-implementations-lib";
+import {ITokenHelper} from "@mojaloop/security-bc-public-types-lib";
+import {TokenHelper} from "@mojaloop/security-bc-client-lib";
 
 const APP_NAME = "mcm-internal-svc";
 const BC_NAME = "cert-management-bc";
@@ -51,11 +54,21 @@ const LOG_LEVEL: LogLevel = process.env["LOG_LEVEL"] as LogLevel || LogLevel.DEB
 
 const SVC_DEFAULT_HTTP_PORT = 3200;
 
+const AUTH_N_SVC_BASEURL = process.env["AUTH_N_SVC_BASEURL"] || "http://localhost:3201";
+const AUTH_N_SVC_JWKS_URL = process.env["AUTH_N_SVC_JWKS_URL"] || `${AUTH_N_SVC_BASEURL}/.well-known/jwks.json`;
+// const AUTH_N_SVC_TOKEN_URL = AUTH_N_SVC_BASEURL + "/token"; // TODO this should not be known here, libs that use the base should add the suffix
+const AUTH_N_TOKEN_ISSUER_NAME = process.env["AUTH_N_TOKEN_ISSUER_NAME"] || "mojaloop.vnext.dev.default_issuer";
+const AUTH_N_TOKEN_AUDIENCE = process.env["AUTH_N_TOKEN_AUDIENCE"] || "mojaloop.vnext.dev.default_audience";
+
 const KAFKA_URL = process.env["KAFKA_URL"] || "localhost:9092";
 const KAFKA_LOGS_TOPIC = process.env["KAFKA_LOGS_TOPIC"] || "logs";
 
 const SERVICE_START_TIMEOUT_MS= (process.env["SERVICE_START_TIMEOUT_MS"] && parseInt(process.env["SERVICE_START_TIMEOUT_MS"])) || 60_000;
 const CERT_DIR = process.env["CERT_DIR"] || path.join(__dirname, "../certs");
+
+const DB_NAME_CERTIFICATES = "certificates";
+
+const MONGO_URL = process.env["MONGO_URL"] || "mongodb://root:mongoDbPas42@localhost:27017/";
 
 const kafkaProducerOptions = {
     kafkaBrokerList: KAFKA_URL
@@ -67,6 +80,8 @@ let globalLogger: ILogger;
 
 export class Service {
     static logger: ILogger;
+    static certsRepo: ICertRepo;
+    static tokenHelper: ITokenHelper;
     static app: Express;
     static expressServer: Server;
     static messageProducer: IMessageProducer;
@@ -77,6 +92,7 @@ export class Service {
     static async start(
         logger?: ILogger,
         messageProducer?: IMessageProducer,
+        certsRepo?: ICertRepo,
         // configProvider?: IConfigProvider,
     ): Promise<void> {
         console.log(`Service starting with PID: ${process.pid}`);
@@ -105,6 +121,14 @@ export class Service {
         }
         globalLogger = this.logger = logger;
 
+        if(!certsRepo){
+			certsRepo = new MongoCertsRepo(this.logger, MONGO_URL, DB_NAME_CERTIFICATES);
+            await certsRepo.init();
+            this.logger.info("MongoDB Certificates Repo Initialized");
+		}
+
+        this.certsRepo = certsRepo;
+
         if (!messageProducer) {
             const producerLogger = logger.createChild("producerLogger");
             producerLogger.setLogLevel(LogLevel.INFO);
@@ -113,15 +137,22 @@ export class Service {
         }
         this.messageProducer = messageProducer;
 
+        this.tokenHelper = new TokenHelper(
+            AUTH_N_SVC_JWKS_URL,
+            logger,
+            AUTH_N_TOKEN_ISSUER_NAME,
+            AUTH_N_TOKEN_AUDIENCE,
+            // new MLKafkaJsonConsumer({kafkaBrokerList: KAFKA_URL, autoOffsetReset: "earliest", kafkaGroupId: INSTANCE_ID}, logger) // for jwt list - no groupId
+        );
+        await this.tokenHelper.init();
+
         this.certificateAggregate = new CertificateAggregate(
             this.configClient,
             this.messageProducer,
             this.logger,
+            this.certsRepo,
             CERT_DIR
         );
-
-        await this.certificateAggregate.init();
-
 
         await this.setupExpress();
 
@@ -135,7 +166,7 @@ export class Service {
             this.app.use(express.json()); // for parsing application/json
             this.app.use(express.urlencoded({extended: true})); // for parsing application/x-www-form-urlencoded
 
-            const routes = new ExpressRoutes(this.configClient, this.certificateAggregate, this.logger);
+            const routes = new ExpressRoutes(this.configClient, this.certificateAggregate, this.logger, this.tokenHelper, this.certsRepo);
 
             // Add health and metrics http routes - before others (to avoid authZ middleware)
             this.app.get("/health", (_req: express.Request, res: express.Response) => {
@@ -204,6 +235,7 @@ process.on("exit", async () => {
 process.on("uncaughtException", (err: Error) => {
     globalLogger.error(err);
     console.log("UncaughtException - EXITING...");
+    console.log("Error Stack Trace: ", err.stack);
     process.exit(999);
 });
 

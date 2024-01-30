@@ -20,18 +20,30 @@
  their names indented and be marked with a '-'. Email address can be added
  optionally within square brackets <email>.
 
- * Crosslake
- - Pedro Sousa Barreto <pedrob@crosslaketech.com>
+ * Gates Foundation
+ - Name Surname <name.surname@gatesfoundation.com>
 
  * ThitsaWorks
- - Si Thu Myo <sithu.myo@thitsaworks.com>
+ - Si Thu Myo <sithu.myo@thisaworks.com.
 
  --------------
  **/
 
- "use strict";
+"use strict";
 
+export type ICertType = "PUBLIC" | "PRIVATE";
+export interface ICertificate {
+    participantId: string;
+    type: ICertType;
+    cert: string;
+    description: string | null;
 
-export * from "./aggregate";
-export * from "./types";
-export * from "./interface/infrastructure";
+    createdBy: string;
+    createdDate: number;
+
+    approved: boolean;
+    approvedBy: string | null;
+    approvedDate: number | null;
+
+    lastUpdated: number;
+}

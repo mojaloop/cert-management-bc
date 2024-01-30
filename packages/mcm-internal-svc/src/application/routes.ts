@@ -30,14 +30,24 @@
 import express from "express";
 import { ILogger } from "@mojaloop/logging-bc-public-types-lib";
 import { IConfigurationClient } from "@mojaloop/platform-configuration-bc-public-types-lib";
-import { CertificateAggregate } from "@mojaloop/cert-management-bc-domain-lib";
+import { CertificateAggregate, ICertRepo, ICertificate } from "@mojaloop/cert-management-bc-domain-lib";
 
 import multer from "multer";
+import {CallSecurityContext, ITokenHelper} from "@mojaloop/security-bc-public-types-lib";
+
+// Extend express request to include our security fields
+declare module "express-serve-static-core" {
+    export interface Request {
+        securityContext: null | CallSecurityContext;
+    }
+}
 
 export class ExpressRoutes {
     private _logger: ILogger;
+    private _tokenHelper: ITokenHelper;
     private _configClient: IConfigurationClient;
     private _certsAgg: CertificateAggregate;
+    private _certsRepo: ICertRepo;
 
     private _mainRouter = express.Router();
 
@@ -45,55 +55,71 @@ export class ExpressRoutes {
         configClient: IConfigurationClient,
         certsAgg: CertificateAggregate,
         logger: ILogger,
+        tokenHelper: ITokenHelper,
+        certsRepo: ICertRepo,
     ) {
         this._configClient = configClient;
         this._logger = logger;
+        this._tokenHelper = tokenHelper;
         this._certsAgg = certsAgg;
+        this._certsRepo = certsRepo;
 
         const storage = multer.memoryStorage();
         const uploadfile = multer({ storage: storage });
 
         this._mainRouter.get(
-            "/certs",
-            this._certsListCertificates.bind(this)
-        );
-
-        this._mainRouter.get(
-            "/certs/:certId",
+            "/certs/:participantId",
             this._certsGetCertificate.bind(this)
         );
 
+        // inject authentication - all request below this require a valid token
+        this._mainRouter.use(this._authenticationMiddleware.bind(this));
+
         this._mainRouter.post(
             "/certs",
-            this._certsStoreCertificate.bind(this)
+            this._addCertificateRequest.bind(this)
         );
 
         this._mainRouter.post(
             "/certs/file",
             uploadfile.single("cert"),
-            this._certsStoreFileCertificate.bind(this)
+            this._addFileCertificateRequest.bind(this)
         );
 
-        this._mainRouter.put(
-            "/certs/:certId",
-            this._certsUpdateCertificate.bind(this)
+        this._mainRouter.post(
+            "/certs/:participantId/approve",
+            this._approveAddingCertificateRequest.bind(this)
         );
-
-        this._mainRouter.put(
-            "/certs/file/:certId",
-            uploadfile.single("cert"),
-            this._certsUpdateFileCertificate.bind(this)
-        );
-
-        this._mainRouter.delete(
-            "/certs/:certId",
-            this._certsDeleteCertificate.bind(this)
-        );
-
     }
+
 
     get MainRouter(): express.Router {
         return this._mainRouter;
+    }
+
+    private async _authenticationMiddleware(
+        req: express.Request,
+        res: express.Response,
+        next: express.NextFunction
+    ) {
+        const authorizationHeader = req.headers["authorization"];
+
+        if (!authorizationHeader) return res.sendStatus(401);
+
+        const bearer = authorizationHeader.trim().split(" ");
+        if (bearer.length != 2) {
+            return res.sendStatus(401);
+        }
+
+        const bearerToken = bearer[1];
+        const callSecCtx:  CallSecurityContext | null = await this._tokenHelper.getCallSecurityContextFromAccessToken(bearerToken);
+
+        if(!callSecCtx){
+            return res.sendStatus(401);
+        }
+
+        req.securityContext = callSecCtx;
+        return next();
     }
 
     private _validateCertFile(cert_id: string, cert_file: Express.Multer.File): boolean {
@@ -112,33 +138,24 @@ export class ExpressRoutes {
         return true;
     }
 
-    private async _certsListCertificates(
-        req: express.Request,
-        res: express.Response,
-    ): Promise<void> {
-        this._logger.debug("Received request to List Certificates");
-
-        try {
-            const certs = await this._certsAgg.listCertificates();
-            res.status(200).send(certs);
-        } catch (error: unknown) {
-            this._logger.error(`Error listing certificates: ${(error as Error).message}`);
-            res.status(500).json({
-                status: "error",
-                msg: (error as Error).message
-            });
-        }
-    }
-
     private async _certsGetCertificate(
         req: express.Request,
         res: express.Response
     ): Promise<void> {
-        this._logger.debug("Received request to Fetch Public Certificate");
-        const certId = req.params.certId;
+        const participantId = req.params.participantId;
+        this._logger.info(`Fetch Public Certificate [${participantId}]`);
+
 
         try {
-            const cert = await this._certsAgg.getCertificate(certId);
+            const cert = await this._certsRepo.getCertificateByParticipantId(participantId);
+            if (!cert) {
+                res.status(404).json({
+                    status: "error",
+                    msg: "Certificate not found",
+                });
+                return;
+            }
+
             res.status(200).send(cert);
         } catch (error: unknown) {
             this._logger.error(`Error getting certificate: ${(error as Error).message}`);
@@ -149,20 +166,36 @@ export class ExpressRoutes {
         }
     }
 
-    private async _certsStoreCertificate(
+    private async _addCertificateRequest(
         req: express.Request,
         res: express.Response
     ): Promise<void> {
-        this._logger.debug(
-            "Received request to Store cert uploaded as string"
-        );
 
-        const certId = req.body.certId ?? null;
+        const participantId = req.body.participantId ?? null;
+        if(!participantId){
+            res.status(400).json({ status: "error", msg: "participantId is required" });
+            return;
+        }
+        this._logger.info(`Adding Certificate  [${participantId}]`);
         const cert = req.body.cert;
 
         try {
-            await this._certsAgg.storeCertificate(certId, cert);
+            const newCertificate: ICertificate = {
+                participantId: participantId,
+                type: "PUBLIC",
+                cert: cert,
+                description: null,
+                createdBy: req.securityContext!.username!,
+                createdDate: Date.now(),
+                approved: false,
+                approvedBy: null,
+                approvedDate: null,
+                lastUpdated: Date.now()
+            };
+
+            await this._certsRepo.addCertificate(newCertificate);
             res.status(200).send();
+
         } catch (error: unknown) {
             this._logger.error(`Error storing certificate: ${(error as Error).message}`);
             res.status(500).json({
@@ -172,33 +205,49 @@ export class ExpressRoutes {
         }
     }
 
-    private async _certsStoreFileCertificate(
+    private async _addFileCertificateRequest(
         req: express.Request,
         res: express.Response
     ): Promise<void> {
-        this._logger.debug(
-            "Received request to Store cert uploaded as file"
-        );
+        this._logger.debug("Received request to Store cert uploaded as file");
 
-        const certId = req.body.certId ?? null;
+        const participantId = req.body.participantId ?? null;
+        if(!participantId){
+            res.status(400).json({ status: "error", msg: "participantId is required" });
+            return;
+        }
 
         try {
             if (!req.file) {
                 this._logger.debug("No file uploaded");
-                res.status(400).json({ error: "No file uploaded" });
+                res.status(422).json({ status: "error", msg: "No file uploaded" });
                 return;
             }
 
-            if(this._validateCertFile(certId, req.file) == false) {
-                this._logger.debug(`Invalid file uploaded. use '${certId}-pub.pem' as filename. ` );
-                res.status(400).json({ error: `Invalid file uploaded. use '${certId}-pub.pem' as filename. ` });
+            if(this._validateCertFile(participantId, req.file) == false) {
+                this._logger.debug(`Invalid file uploaded. use '${participantId}-pub.pem' as filename. ` );
+                res.status(400).json({ status: "error", msg: `Invalid file uploaded. use '${participantId}-pub.pem' as filename. ` });
                 return;
             }
 
             const cert = req.file.buffer.toString();
+            const newCertificate: ICertificate = {
+                participantId: participantId,
+                type: "PUBLIC",
+                cert: cert,
+                description: null,
+                createdBy: req.securityContext!.username!,
+                createdDate: Date.now(),
+                approved: false,
+                approvedBy: null,
+                approvedDate: null,
+                lastUpdated: Date.now()
+            };
 
-            await this._certsAgg.storeCertificate(certId, cert);
+            await this._certsRepo.addCertificate(newCertificate);
+            this._logger.debug("Certificate stored successfully");
             res.status(200).send();
+
         } catch (error: unknown) {
             this._logger.error(`Error storing certificate: ${(error as Error).message}`);
             res.status(500).json({
@@ -208,71 +257,56 @@ export class ExpressRoutes {
         }
     }
 
-    private async _certsUpdateCertificate(
+    private async _approveAddingCertificateRequest(
         req: express.Request,
         res: express.Response
     ): Promise<void> {
-        this._logger.debug(
-            "Received request to Update cert uploaded as string"
-        );
+        this._logger.debug("Received request to approve adding certificate");
 
-        const certId = req.params.certId ?? null;
-        const cert = req.body.cert;
-
-        try {
-            await this._certsAgg.updateCertificate(certId, cert);
-            res.status(200).send();
-        } catch (error: unknown) {
-            this._logger.error(`Error updating certificate: ${(error as Error).message}`);
-            res.status(500).json({
-                status: "error",
-                msg: (error as Error).message
-            });
+        const participantId = req.params.participantId ?? null;
+        if(!participantId){
+            res.status(400).json({ status: "error", msg: "participantId is required" });
+            return;
         }
-    }
 
-    private async _certsUpdateFileCertificate(
-        req: express.Request,
-        res: express.Response
-    ): Promise<void> {
-        this._logger.debug(
-            "Received request to Update cert uploaded as file"
-        );
-
-        const certId = req.params.certId ?? null;
-
-        try {
-            if (!req.file) {
-                this._logger.debug("No file uploaded");
-                res.status(400).json({ error: "No file uploaded" });
-                return;
-            }
-
-            const cert = req.file.buffer.toString();
-
-            await this._certsAgg.updateCertificate(certId, cert);
-            res.status(200).send();
-        } catch (error: unknown) {
-            this._logger.error(`Error updating certificate: ${(error as Error).message}`);
-            res.status(500).json({
+        const cert = await this._certsRepo.getCertificateByParticipantId(participantId);
+        if (!cert) {
+            res.status(404).json({
                 status: "error",
-                msg: (error as Error).message
+                msg: "Certificate not found",
             });
+            return;
         }
-    }
 
-    private async _certsDeleteCertificate(
-        req: express.Request,
-        res: express.Response
-    ): Promise<void> {
-        this._logger.debug("Received request to Delete Certificate");
-        const certId = req.params.certId;
+        if(cert.approved){
+            res.status(400).json({
+                status: "error",
+                msg: "Certificate already approved",
+            });
+            return;
+        }
+
+        if(cert.createdBy === req.securityContext!.username!){
+            res.status(400).json({
+                status: "error",
+                msg: "You cannot approve your own certificate",
+            });
+            return;
+        }
+
+        if(cert.approvedBy === req.securityContext!.username!){
+            res.status(400).json({
+                status: "error",
+                msg: "You already approved this certificate",
+            });
+            return;
+        }
 
         try {
-            await this._certsAgg.deleteCertificate(certId);
+            await this._certsRepo.approveCertificate(participantId, req.securityContext!.username!);
             res.status(200).send();
         } catch (error: unknown) {
-            this._logger.error(`Error deleting certificate: ${(error as Error).message}`);
+            this._logger.error(`Error approving adding certificate: ${(error as Error).message}`);
             res.status(500).json({
                 status: "error",
                 msg: (error as Error).message

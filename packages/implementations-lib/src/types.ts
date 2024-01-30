@@ -20,18 +20,23 @@
  their names indented and be marked with a '-'. Email address can be added
  optionally within square brackets <email>.
 
- * Crosslake
- - Pedro Sousa Barreto <pedrob@crosslaketech.com>
+ * Gates Foundation
+ - Name Surname <name.surname@gatesfoundation.com>
 
- * ThitsaWorks
- - Si Thu Myo <sithu.myo@thitsaworks.com>
+ * Arg Software
+ - José Antunes <jose.antunes@arg.software>
+ - Rui Rocha <rui.rocha@arg.software>
 
  --------------
  **/
 
- "use strict";
+"use strict";
 
+export type MongoQueryError = {
+    message: string
+};
 
-export * from "./aggregate";
-export * from "./types";
-export * from "./interface/infrastructure";
+export interface LocalCacheResult {
+    value: null|string|number|object;
+    timestamp: number;
+}

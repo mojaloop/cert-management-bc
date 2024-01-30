@@ -30,12 +30,13 @@
 import express from "express";
 import { ILogger } from "@mojaloop/logging-bc-public-types-lib";
 import { IConfigurationClient } from "@mojaloop/platform-configuration-bc-public-types-lib";
-import { CertificateAggregate } from "@mojaloop/cert-management-bc-domain-lib";
+import { CertificateAggregate, ICertRepo } from "@mojaloop/cert-management-bc-domain-lib";
 
 export class ExpressRoutes {
     private _logger: ILogger;
     private _configClient: IConfigurationClient;
     private _certsAgg: CertificateAggregate;
+    private _certsRepo: ICertRepo;
 
     private _mainRouter = express.Router();
 
@@ -43,18 +44,15 @@ export class ExpressRoutes {
         configClient: IConfigurationClient,
         certsAgg: CertificateAggregate,
         logger: ILogger,
+        certsRepo: ICertRepo
     ) {
         this._configClient = configClient;
         this._logger = logger;
         this._certsAgg = certsAgg;
+        this._certsRepo = certsRepo;
 
         this._mainRouter.get(
-            "/certs",
-            this._certsListCertificates.bind(this)
-        );
-
-        this._mainRouter.get(
-            "/certs/:certId",
+            "/certs/:participantId",
             this._certsGetCertificate.bind(this)
         );
     }
@@ -63,33 +61,23 @@ export class ExpressRoutes {
         return this._mainRouter;
     }
 
-    private async _certsListCertificates(
-        req: express.Request,
-        res: express.Response,
-    ): Promise<void> {
-        this._logger.debug("Received request to List Certificates");
-
-        try {
-            const certs = await this._certsAgg.listCertificates();
-            res.status(200).send(certs);
-        } catch (error: unknown) {
-            this._logger.error(`Error listing certificates: ${(error as Error).message}`);
-            res.status(500).json({
-                status: "error",
-                msg: (error as Error).message
-            });
-        }
-    }
-
     private async _certsGetCertificate(
         req: express.Request,
         res: express.Response
     ): Promise<void> {
         this._logger.debug("Received request to Fetch Public Certificate");
-        const certId = req.params.certId;
+        const participantId = req.params.participantId;
 
         try {
-            const cert = await this._certsAgg.getCertificate(certId);
+            const cert = await this._certsRepo.getCertificateByParticipantId(participantId);
+            if(!cert) {
+                throw new Error(`No certificate found for participantId: ${participantId}`);
+            }
+
+            if(!cert.approved) {
+                throw new Error(`Certificate not approved yet for participantId: ${participantId}`);
+            }
+
             res.status(200).send(cert);
         } catch (error: unknown) {
             this._logger.error(`Error getting certificate: ${(error as Error).message}`);

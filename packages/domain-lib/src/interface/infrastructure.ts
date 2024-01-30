@@ -20,18 +20,31 @@
  their names indented and be marked with a '-'. Email address can be added
  optionally within square brackets <email>.
 
- * Crosslake
- - Pedro Sousa Barreto <pedrob@crosslaketech.com>
+ * Gates Foundation
+ - Name Surname <name.surname@gatesfoundation.com>
 
  * ThitsaWorks
- - Si Thu Myo <sithu.myo@thitsaworks.com>
+ - Si Thu Myo <sithu.myo@thisaworks.com.
 
  --------------
  **/
 
- "use strict";
+"use strict";
 
+import {ICertificate} from "../types";
 
-export * from "./aggregate";
-export * from "./types";
-export * from "./interface/infrastructure";
+export interface ICertRepo {
+    init(): Promise<void>;
+    destroy(): Promise<void>;
+
+    getCertificateByParticipantId(participantId: string): Promise<ICertificate | null>;
+    // getCertificates(): Promise<ICertificate[]>; // We don't need this for now
+
+    addCertificate(certificate: ICertificate): Promise<void>;
+    updateCertificate(certificate: ICertificate): Promise<void>;
+    deleteCertificate(participantId: string): Promise<void>;
+
+    approveCertificate(participantId: string, approvedBy: string): Promise<void>;
+    // rejectCertificate(participantId: string, approvedBy: string): Promise<void>;
+
+}
