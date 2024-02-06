@@ -33,6 +33,7 @@
 
 export type ICertType = "PUBLIC" | "PRIVATE";
 export interface ICertificate {
+    _id: string | null;
     participantId: string;
     type: ICertType;
     cert: string;

@@ -38,13 +38,16 @@ export interface ICertRepo {
     destroy(): Promise<void>;
 
     getCertificateByParticipantId(participantId: string): Promise<ICertificate | null>;
-    // getCertificates(): Promise<ICertificate[]>; // We don't need this for now
+    getCertificateByObjectId(object_id: string): Promise<ICertificate | null>;
+    getCertificateRequests(): Promise<ICertificate[]>;
+    getCertificateRequestsByParticipantIds(participantIds: string[]): Promise<ICertificate[]>;
 
-    addCertificate(certificate: ICertificate): Promise<void>;
+    addCertificateRequest(certificate: ICertificate): Promise<void>;
     updateCertificate(certificate: ICertificate): Promise<void>;
     deleteCertificate(participantId: string): Promise<void>;
 
-    approveCertificate(participantId: string, approvedBy: string): Promise<void>;
-    // rejectCertificate(participantId: string, approvedBy: string): Promise<void>;
+    approveCertificate(certificateId: string, participantId: string, approvedBy: string): Promise<void>;
+    bulkApproveCertificates(participantIds: string[], approvedBy: string): Promise<void>;
 
+    deleteCertificateRequest(participantId: string): Promise<void>;
 }

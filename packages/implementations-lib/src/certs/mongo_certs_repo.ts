@@ -31,7 +31,7 @@
 
 "use strict";
 
-import { Collection, Document, MongoClient, WithId } from "mongodb";
+import { Collection, Document, MongoClient, ObjectId, WithId } from "mongodb";
 import { ILogger } from "@mojaloop/logging-bc-public-types-lib";
 import {
     CertAlreadyExistsError,
@@ -53,8 +53,10 @@ export class MongoCertsRepo implements ICertRepo {
     private readonly _connectionString: string;
     private readonly _dbName;
     private readonly _collectionName = "certificates";
+    private readonly _requestsCollectionName = "certificatesRequests";
     private mongoClient: MongoClient;
     private certsCollection: Collection;
+    private requestsCollection: Collection;
 
     constructor(logger: ILogger, connectionString: string, dbName: string) {
         this._logger = logger.createChild(this.constructor.name);
@@ -66,9 +68,15 @@ export class MongoCertsRepo implements ICertRepo {
         try {
             this.mongoClient = new MongoClient(this._connectionString);
             this.mongoClient.connect();
+
             this.certsCollection = this.mongoClient
                 .db(this._dbName)
                 .collection(this._collectionName);
+
+            this.requestsCollection = this.mongoClient
+                .db(this._dbName)
+                .collection(this._requestsCollectionName);
+
         } catch (e: unknown) {
             this._logger.error(
                 `Unable to connect to the database: ${(e as Error).message}`
@@ -94,11 +102,64 @@ export class MongoCertsRepo implements ICertRepo {
         }
     }
 
-    async addCertificate(certificate: ICertificate): Promise<void> {
-        const certToAdd = { ...certificate };
-        if (certToAdd.participantId) {
-            await this.checkIfCertExists(certificate);
+    async getCertificateRequests(): Promise<ICertificate[]> {
+        const certs = await this.certsCollection
+            .find({ approved: false })
+            .toArray()
+            .catch((e: unknown) => {
+                this._logger.error(
+                    `Unable to get certificate requests: ${(e as Error).message}`
+                );
+                throw new UnableToGetCertError(
+                    "Unable to get certificate requests"
+                );
+            });
+
+        return certs.map((cert) => this.mapToCert(cert));
+    }
+
+    async getCertificateByObjectId(
+        objectId: string
+    ): Promise<ICertificate | null> {
+        const cert = await this.certsCollection
+            .findOne({ _id: new ObjectId(objectId) })
+            .catch((e: unknown) => {
+                this._logger.error(
+                    `Unable to get certificate by object id: ${(e as Error).message}`
+                );
+                throw new UnableToGetCertError(
+                    "Unable to get certificate by object id"
+                );
+            });
+
+        if (!cert) {
+            return null;
         }
+        return this.mapToCert(cert);
+    }
+
+    async getCertificateRequestsByParticipantIds(
+        participantIds: string[]
+    ): Promise<ICertificate[]> {
+        const certs = await this.certsCollection
+            .find({ participantId: { $in: participantIds }, approved: false })
+            .toArray()
+            .catch((e: unknown) => {
+                this._logger.error(
+                    `Unable to get certificate requests by participant ids: ${participantIds} - ${(e as Error).message}`
+                );
+                throw new UnableToGetCertError(
+                    "Unable to get certificate requests by participant ids"
+                );
+            });
+
+        return certs.map((cert) => this.mapToCert(cert));
+    }
+
+
+    async addCertificateRequest(certificate: ICertificate): Promise<void> {
+        const certToAdd: any = { ...certificate };
+        certToAdd._id = undefined;
 
         await this.certsCollection.insertOne(certToAdd).catch((e: unknown) => {
             this._logger.error(
@@ -136,7 +197,6 @@ export class MongoCertsRepo implements ICertRepo {
     async deleteCertificate(participantId: string): Promise<void> {
         const deleteResult = await this.certsCollection
             .deleteOne({ participantId })
-
             .catch((e: unknown) => {
                 this._logger.error(
                     `Unable to delete certificate: ${(e as Error).message}`
@@ -158,7 +218,6 @@ export class MongoCertsRepo implements ICertRepo {
     ): Promise<ICertificate | null> {
         const cert = await this.certsCollection
             .findOne({ participantId: participantId })
-
             .catch((e: unknown) => {
                 this._logger.error(
                     `Unable to get certificate by id: ${(e as Error).message}`
@@ -176,20 +235,56 @@ export class MongoCertsRepo implements ICertRepo {
     }
 
     async approveCertificate(
+        certificateId: string,
         participantId: string,
         approvedBy: string
     ): Promise<void> {
-        const existingCert = await this.getCertificateByParticipantId(
-            participantId
-        );
+        const certObjectId = new ObjectId(certificateId);
+        try{
 
-        if (!existingCert || !existingCert.participantId) {
-            throw new CertNotFoundError("Certificate not found");
+            // Approve the current certificate
+            const updateResult = await this.certsCollection.updateOne(
+                { _id: certObjectId },
+                {
+                    $set: {
+                        approved: true,
+                        approvedBy: approvedBy,
+                        approvedDate: new Date(),
+                    },
+                },
+            );
+            updateResult.upsertedId;
+
+            // Check if the certificate was successfully updated
+            if (updateResult.matchedCount === 0) {
+                throw new Error("Updating Certificate not found");
+            }
+            if (updateResult.modifiedCount === 0) {
+                throw new Error("No Certificate was updated");
+            }
+
+            // Remove the previous approved certificates except the current one
+            await this.certsCollection.deleteMany(
+                { participantId: participantId, approved: true, _id: { $ne: certObjectId } });
+
+        } catch (e: unknown) {
+            this._logger.error(`Unable to approve certificate: ${(e as Error).message}`);
+            throw new UnableToUpdateCertError("Unable to approve certificate");
         }
 
+    }
+
+    async bulkApproveCertificates(
+        participantIds: string[],
+        approvedBy: string
+    ): Promise<void> {
+        const exisingApprovedCerts = await this.certsCollection
+            .find({ participantId: { $in: participantIds }, approved: true })
+            .toArray();
+
         await this.certsCollection
-            .updateOne(
-                { participantId: participantId },
+            .updateMany(
+                { participantId: { $in: participantIds } },
                 {
                     $set: {
                         approved: true,
@@ -198,76 +293,47 @@ export class MongoCertsRepo implements ICertRepo {
                     },
                 }
             )
+            .catch((e: unknown) => {
+                this._logger.error(
+                    `Unable to bulk approve certificates: ${(e as Error).message}`
+                );
+                throw new UnableToUpdateCertError(
+                    "Unable to bulk approve certificates"
+                );
+            });
+
+        if (exisingApprovedCerts.length > 0) {
+            // remove the existing approved certificates
+            await this.certsCollection
+                .deleteMany({ participantId: { $in: participantIds }, approved: true });
+        }
+    }
+
+    async deleteCertificateRequest(certificate_id: string): Promise<void> {
+        const deleteResult = await this.certsCollection
+            .deleteOne({ _id: new ObjectId(certificate_id) })
 
             .catch((e: unknown) => {
                 this._logger.error(
-                    `Unable to approve certificate: ${(e as Error).message}`
+                    `Unable to delete certificate request: ${(e as Error).message}`
                 );
-                throw new UnableToUpdateCertError(
-                    "Unable to approve certificate"
+                throw new UnableToDeleteCertError(
+                    "Unable to delete certificate request"
                 );
             });
+
+        if (deleteResult.deletedCount == 1) {
+            return;
+        } else {
+            throw new UnableToDeleteCertError("Certificate request not found");
+        }
     }
 
-    // async rejectCertificate(
-    //     participantId: string,
-    //     approvedBy: string
-    // ): Promise<void> {
-    //     const existingCert = await this.getCertificateByParticipantId(
-    //         participantId
-    //     );
-    //
-    //     if (!existingCert || !existingCert.participantId) {
-    //         throw new CertNotFoundError("Certificate not found");
-    //     }
-    //
-    //     await this.certsCollection
-    //         .updateOne(
-    //             { participantId: participantId },
-    //             {
-    //                 $set: {
-    //                     approved: false,
-    //                     approvedBy: approvedBy,
-    //                     approvedDate: new Date(),
-    //                 },
-    //             }
-    //         )
-    //         .catch((e: unknown) => {
-    //             this._logger.error(
-    //                 `Unable to reject certificate: ${(e as Error).message}`
-    //             );
-    //             throw new UnableToUpdateCertError(
-    //                 "Unable to reject certificate"
-    //             );
-    //         });
-    // }
-    //
 
-
-
-    // We don't need this for now
-    // async getCertificates(): Promise<ICertificate[]> {
-    //     const certs = await this.certsCollection
-    //         .find()
-    //         .toArray()
-    //         .catch((e: unknown) => {
-    //             this._logger.error(
-    //                 `Unable to get certificates: ${(e as Error).message}`
-    //             );
-    //             throw new UnableToGetCertError("Unable to get certificates");
-    //         });
-    //
-    //     const mappedCerts = [];
-    //
-    //     for (const cert of certs) {
-    //         mappedCerts.push(this.mapToCert(cert));
-    //     }
-    //
-    //     return mappedCerts;
-    // }
 
     private mapToCert(cert: WithId<Document>): ICertificate {
         const certMapped: ICertificate = {
+            _id: cert._id.toHexString(),
             participantId: cert.participantId ?? null,
             type: cert.type ?? null,
             cert: cert.cert ?? null,
@@ -288,7 +354,6 @@ export class MongoCertsRepo implements ICertRepo {
                 .findOne({
                     participantId: certificate.participantId,
                 })
-
                 .catch((e: unknown) => {
                     this._logger.error(
                         `Unable to add certificate: ${(e as Error).message}`

@@ -16,6 +16,8 @@ COPY package*.json ./
 
 # copy any local libraries this service needs
 #COPY packages/public-types-lib/package.json ./packages/public-types-lib/
+COPY packages/domain-lib/ ./packages/domain-lib/
+COPY packages/implementations-lib/ ./packages/implementations-lib/
 COPY packages/mcm-external-svc/package.json ./packages/mcm-external-svc/
 
 #RUN ls -la
