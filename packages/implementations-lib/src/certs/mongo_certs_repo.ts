@@ -337,6 +337,7 @@ export class MongoCertsRepo implements ICertRepo {
             participantId: cert.participantId ?? null,
             type: cert.type ?? null,
             cert: cert.cert ?? null,
+            parsedInfo: cert.parsedInfo ?? null,
             description: cert.description ?? null,
             createdBy: cert.createdBy ?? null,
             createdDate: cert.createdDate ?? null,

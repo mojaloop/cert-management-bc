@@ -32,11 +32,24 @@
 "use strict";
 
 export type ICertType = "PUBLIC" | "PRIVATE";
+
+export interface IParsedCertificateInfo {
+    subject: string;
+    issuer: string;
+    validFrom: string;
+    validTo: string;
+    serialNumber: string;
+    publicKeyAlgorithm: string;
+    signatureAlgorithm: string;
+    extensions: Record<string, any>;
+}
+
 export interface ICertificate {
     _id: string | null;
     participantId: string;
     type: ICertType;
     cert: string;
+    parsedInfo?: IParsedCertificateInfo;
     description: string | null;
 
     createdBy: string;

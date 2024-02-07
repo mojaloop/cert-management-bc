@@ -30,10 +30,15 @@
 import express from "express";
 import { ILogger } from "@mojaloop/logging-bc-public-types-lib";
 import { IConfigurationClient } from "@mojaloop/platform-configuration-bc-public-types-lib";
-import { CertificateAggregate, ICertRepo, ICertificate } from "@mojaloop/cert-management-bc-domain-lib";
+import { CertificateAggregate, ICertRepo, ICertificate, IParsedCertificateInfo } from "@mojaloop/cert-management-bc-domain-lib";
 
 import multer from "multer";
-import {CallSecurityContext, ITokenHelper} from "@mojaloop/security-bc-public-types-lib";
+import {
+    CallSecurityContext,
+    ITokenHelper,
+} from "@mojaloop/security-bc-public-types-lib";
+import { Certificate } from "pkijs";
+import * as asn1js from "asn1js";
 
 // Extend express request to include our security fields
 declare module "express-serve-static-core" {
@@ -78,11 +83,6 @@ export class ExpressRoutes {
         this._mainRouter.get(
             "/certs/:participantId",
             this._getCertificate.bind(this)
-        );
-
-        this._mainRouter.post(
-            "/certs",
-            this._addCertificateRequest.bind(this)
         );
 
         this._mainRouter.post(
@@ -137,7 +137,7 @@ export class ExpressRoutes {
         return next();
     }
 
-    private _validateCertFile(cert_id: string, cert_file: Express.Multer.File): boolean {
+    private _validateCertFilename(cert_id: string, cert_file: Express.Multer.File): boolean {
         // filename should be cert_id-pub.pem
         const filename = cert_file.originalname;
         const filename_parts = filename.split(".");
@@ -200,46 +200,6 @@ export class ExpressRoutes {
         }
     }
 
-    private async _addCertificateRequest(
-        req: express.Request,
-        res: express.Response
-    ): Promise<void> {
-
-        const participantId = req.body.participantId ?? null;
-        if(!participantId){
-            res.status(400).json({ status: "error", msg: "participantId is required" });
-            return;
-        }
-        this._logger.info(`Adding Certificate  [${participantId}]`);
-        const cert = req.body.cert;
-
-        try {
-            const newCertificate: ICertificate = {
-                _id: null,
-                participantId: participantId,
-                type: "PUBLIC",
-                cert: cert,
-                description: null,
-                createdBy: req.securityContext!.username!,
-                createdDate: Date.now(),
-                approved: false,
-                approvedBy: null,
-                approvedDate: null,
-                lastUpdated: Date.now()
-            };
-
-            await this._certsRepo.addCertificateRequest(newCertificate);
-            res.status(200).send();
-
-        } catch (error: unknown) {
-            this._logger.error(`Error storing certificate: ${(error as Error).message}`);
-            res.status(500).json({
-                status: "error",
-                msg: (error as Error).message
-            });
-        }
-    }
-
     private async _addFileCertificateRequest(
         req: express.Request,
         res: express.Response
@@ -259,18 +219,43 @@ export class ExpressRoutes {
                 return;
             }
 
-            if(this._validateCertFile(participantId, req.file) == false) {
+            if(this._validateCertFilename(participantId, req.file) == false) {
                 this._logger.debug(`Invalid file uploaded. use '${participantId}-pub.pem' as filename. ` );
                 res.status(400).json({ status: "error", msg: `Invalid file uploaded. use '${participantId}-pub.pem' as filename. ` });
                 return;
             }
 
             const cert = req.file.buffer.toString();
+
+            if (!this._validateCertificateData(cert)) {
+                res.status(400).json({ status: "error", msg: "Invalid certificate data" });
+                return;
+            }
+
+            const pkijsCert = this._parseCertificate(cert);
+            if (!pkijsCert) {
+                res.status(400).json({ status: "error", msg: "Invalid certificate data" });
+                return;
+            }
+
+            // Extract certificate info
+            const parsedInfo: IParsedCertificateInfo = {
+                subject:  pkijsCert.subject.typesAndValues.map((tv) => `${this.getCertCommonName(tv.type)}: ${tv.value.valueBlock.value}`).join(", "),
+                issuer : pkijsCert.issuer.typesAndValues.map((tv) => `${this.getCertCommonName(tv.type)}: ${tv.value.valueBlock.value}`).join(", "),
+                validFrom : pkijsCert.notBefore.value.toString(),
+                validTo : pkijsCert.notAfter.value.toString(),
+                serialNumber : pkijsCert.serialNumber.valueBlock.toString(),
+                publicKeyAlgorithm : this.getCertCommonName(pkijsCert.subjectPublicKeyInfo.algorithm.algorithmId),
+                signatureAlgorithm : this.getCertCommonName(pkijsCert.signatureAlgorithm.algorithmId),
+                extensions : {},
+            };
+
             const newCertificate: ICertificate = {
                 _id: null,
                 participantId: participantId,
                 type: "PUBLIC",
                 cert: cert,
+                parsedInfo: parsedInfo,
                 description: null,
                 createdBy: req.securityContext!.username!,
                 createdDate: Date.now(),
@@ -346,6 +331,7 @@ export class ExpressRoutes {
 
         try {
             await this._certsRepo.approveCertificate(certificateId, participantId, req.securityContext!.username!);
+            await this._certsRepo.approveCertificate(certificateId, participantId, "ssdf");
             res.status(200).send();
         } catch (error: unknown) {
             this._logger.error(`Error approving adding certificate: ${(error as Error).message}`);
@@ -419,4 +405,62 @@ export class ExpressRoutes {
             });
         }
     }
+
+    private _validateCertificateData(pem: string): boolean {
+        try {
+            const parsedCert = this._parseCertificate(pem);
+            if (!parsedCert) {
+                return false;
+            }
+            return true;
+        } catch (error: unknown) {
+            this._logger.error(`Error parsing certificate: ${(error as Error).message}`);
+            return false;
+        }
+    }
+
+    private _parseCertificate(pem: string): Certificate | null  {
+        // Convert PEM to ArrayBuffer,
+        // removing header, footer and line breaks
+        const b64 = pem.replace(/(-----(BEGIN|END) [^-]+-----|[\n\r])/g, "");
+        const binaryString = atob(b64);
+        const bytes = new Uint8Array(binaryString.length);
+
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        // Parse the certificate
+        const asn1 = asn1js.fromBER(bytes.buffer);
+        if (asn1.offset === -1) {
+            console.error("Cannot parse the certificate");
+            return null;
+        }
+
+        // Try catch block to handle parsing errors?
+        const certificate = new Certificate({ schema: asn1.result });
+
+        return certificate;
+    }
+
+    private getCertCommonName(oid: string): string {
+        const oidMap: Record<string, string> = {
+            "2.5.4.6": "Country Name",
+            "2.5.4.8": "State or Province Name",
+            "2.5.4.7": "Locality",
+            "2.5.4.10": "Organization Name",
+            "2.5.4.11": "Organizational Unit Name",
+            "2.5.4.3": "Common Name",
+            "1.2.840.113549.1.1.1": "RSA Encryption",
+            "1.2.840.113549.1.1.11": "sha256WithRSAEncryption",
+            "1.2.840.10040.4.1": "DSA",
+            "1.2.840.10045.2.1": "EC Public Key",
+            // Algorithm Identifiers
+            "1.2.840.113549.1.1.4": "md5WithRSAEncryption",
+            "1.2.840.113549.1.1.5": "sha1WithRSAEncryption",
+        };
+
+        return oidMap[oid]|| oid; // return Return the OID itself if a mapping is not found
+    }
+
 }
