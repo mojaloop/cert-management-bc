@@ -47,7 +47,9 @@ export interface ICertRepo {
     deleteCertificate(participantId: string): Promise<void>;
 
     approveCertificate(certificateId: string, approvedBy: string): Promise<void>;
-    bulkApproveCertificates(participantIds: string[], approvedBy: string): Promise<void>;
+    bulkApproveCertificates(certificateIds: string[], approvedBy: string): Promise<void>;
 
     deleteCertificateRequest(participantId: string): Promise<void>;
+
+    isAllCertificatesUniqueParticipants(certificateIds: string[]): Promise<boolean>;
 }

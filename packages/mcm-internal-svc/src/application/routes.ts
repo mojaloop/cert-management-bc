@@ -97,7 +97,7 @@ export class ExpressRoutes {
         );
 
         this._mainRouter.post(
-            "/certs/:_id/bulkapprove",
+            "/certs/bulkapprove",
             this._bulkApproveAddingCertificateRequest.bind(this)
         );
 
@@ -341,14 +341,21 @@ export class ExpressRoutes {
     ): Promise<void> {
         this._logger.debug("Received request to bulk approve adding certificate");
 
-        const participantIds = req.body.participantIds ?? null;
-        if(!participantIds){
-            res.status(400).json({ status: "error", msg: "participantIds is required" });
+        const certificateIds = req.body.certificateIds ?? null;
+        if(!certificateIds) {
+            res.status(400).json({ status: "error", msg: "certificateIds is required" });
             return;
         }
 
         try {
-            await this._certsRepo.bulkApproveCertificates(participantIds, req.securityContext!.username!);
+            const isUnique = await this._certsRepo.isAllCertificatesUniqueParticipants(certificateIds);
+            this._logger.debug(`isUnique: ${isUnique}`);
+            if(!isUnique){
+                res.status(400).json({ status: "error", msg: "Bulk Approval requires all participants to be unique" });
+                return;
+            }
+
+            await this._certsRepo.bulkApproveCertificates(certificateIds, req.securityContext!.username!);
             res.status(200).send();
         } catch (error: unknown) {
             this._logger.error(`Error bulk approving adding certificate: ${(error as Error).message}`);

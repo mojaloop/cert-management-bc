@@ -240,7 +240,6 @@ export class MongoCertsRepo implements ICertRepo {
     ): Promise<void> {
         const certObjectId = new ObjectId(certificateId);
         try{
-
             // Approve the current certificate
             const updateResult = await this.certsCollection.updateOne(
                 { _id: certObjectId },
@@ -252,7 +251,6 @@ export class MongoCertsRepo implements ICertRepo {
                     },
                 },
             );
-            updateResult.upsertedId;
 
             const participantId = await this.certsCollection.findOne(
                 { _id: certObjectId },
@@ -279,16 +277,18 @@ export class MongoCertsRepo implements ICertRepo {
     }
 
     async bulkApproveCertificates(
-        participantIds: string[],
+        certificateIds: string[],
         approvedBy: string
     ): Promise<void> {
+        const certObjectIds = certificateIds.map((id) => new ObjectId(id));
+
         const exisingApprovedCerts = await this.certsCollection
-            .find({ participantId: { $in: participantIds }, approved: true })
+            .find({ _id: { $in: certObjectIds }, approved: true })
             .toArray();
 
-        await this.certsCollection
+        const approvedResults = await this.certsCollection
             .updateMany(
-                { participantId: { $in: participantIds } },
+                { _id: { $in: certObjectIds } },
                 {
                     $set: {
                         approved: true,
@@ -306,10 +306,17 @@ export class MongoCertsRepo implements ICertRepo {
                 );
             });
 
+        if (approvedResults.modifiedCount === 0) {
+            throw new UnableToUpdateCertError("No certificates were updated");
+        }
+
         if (exisingApprovedCerts.length > 0) {
+            const existingApprovedCertsIds = exisingApprovedCerts.map(
+                (cert) => cert._id
+            );
             // remove the existing approved certificates
             await this.certsCollection
-                .deleteMany({ participantId: { $in: participantIds }, approved: true });
+                .deleteMany({ _id: { $in: existingApprovedCertsIds }, approved: true });
         }
     }
 
@@ -333,6 +340,18 @@ export class MongoCertsRepo implements ICertRepo {
         }
     }
 
+    async isAllCertificatesUniqueParticipants(certificateIds: string[]): Promise<boolean> {
+        // get participantIds from the certificateIds
+        const certObjectIds = certificateIds.map((id) => new ObjectId(id));
+        const participantIds = await this.certsCollection.find(
+            { _id: { $in: certObjectIds } },
+            { projection: { participantId: 1 } })
+            .toArray()
+            .then((certs) => certs.map((cert) => cert.participantId));
+
+        // check if all participantIds are unique
+        return new Set(participantIds).size === participantIds.length;
+    }
 
 
     private mapToCert(cert: WithId<Document>): ICertificate {
