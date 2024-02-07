@@ -285,14 +285,8 @@ export class ExpressRoutes {
         this._logger.debug("Received request to approve adding certificate");
 
         const certificateId = req.params._id ?? null;
-        const participantId = req.params.participantId ?? null;
         if(!certificateId){
             res.status(400).json({ status: "error", msg: "certificateId is required" });
-            return;
-        }
-
-        if(!participantId){
-            res.status(400).json({ status: "error", msg: "participantId is required" });
             return;
         }
 
@@ -330,8 +324,7 @@ export class ExpressRoutes {
         }
 
         try {
-            await this._certsRepo.approveCertificate(certificateId, participantId, req.securityContext!.username!);
-            await this._certsRepo.approveCertificate(certificateId, participantId, "ssdf");
+            await this._certsRepo.approveCertificate(certificateId, req.securityContext!.username!);
             res.status(200).send();
         } catch (error: unknown) {
             this._logger.error(`Error approving adding certificate: ${(error as Error).message}`);

@@ -236,7 +236,6 @@ export class MongoCertsRepo implements ICertRepo {
 
     async approveCertificate(
         certificateId: string,
-        participantId: string,
         approvedBy: string
     ): Promise<void> {
         const certObjectId = new ObjectId(certificateId);
@@ -254,6 +253,11 @@ export class MongoCertsRepo implements ICertRepo {
                 },
             );
             updateResult.upsertedId;
+
+            const participantId = await this.certsCollection.findOne(
+                { _id: certObjectId },
+                { projection: { participantId: 1 } }
+            );
 
             // Check if the certificate was successfully updated
             if (updateResult.matchedCount === 0) {
