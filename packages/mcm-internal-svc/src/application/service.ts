@@ -123,7 +123,7 @@ export class Service {
 
         if(!certsRepo){
 			certsRepo = new MongoCertsRepo(this.logger, MONGO_URL, DB_NAME_CERTIFICATES);
-            await certsRepo.init();
+            await certsRepo!.init();
             this.logger.info("MongoDB Certificates Repo Initialized");
 		}
 
