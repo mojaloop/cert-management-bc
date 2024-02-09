@@ -46,7 +46,8 @@ import {
 import {
     ICertRepo,
     ICertificate,
-    ICertificateRequest
+    ICertificateRequest,
+    IPublicKeyInfo
 } from "@mojaloop/cert-management-bc-domain-lib";
 
 export class MongoCertsRepo implements ICertRepo {
@@ -117,6 +118,28 @@ export class MongoCertsRepo implements ICertRepo {
             });
 
         return certs.map((cert) => this.mapToCert(cert));
+    }
+
+    async getAllPublicKeys(): Promise<IPublicKeyInfo[]> {
+        const certs = await this.certsCollection
+            .find({}, { projection: { participantId: 1, publicKey: 1 } })
+            .toArray()
+            .catch((e: unknown) => {
+                this._logger.error(
+                    `Unable to get all public keys: ${(e as Error).message}`
+                );
+                throw new UnableToGetCertError(
+                    "Unable to get all public keys"
+                );
+            });
+
+        // filter out _id and return
+        return certs.map((cert) => {
+            return {
+                participantId: cert.participantId,
+                publicKey: cert.publicKey
+            } as IPublicKeyInfo;
+        });
     }
 
     async getCertificateByObjectId(
@@ -304,33 +327,37 @@ export class MongoCertsRepo implements ICertRepo {
         approvedBy: string
     ): Promise<void> {
         const certObjectId = new ObjectId(certificateId);
+        // Find the approval request containing the certificate request
+        const approvalDocument = await this.approvalsCollection.findOne({
+            "participantCertificateUploadRequests._id": certObjectId
+        });
+
+        if (!approvalDocument) {
+            throw new Error("Approval Document not found.");
+        }
+
+         // Extract the specific certificate from request list
+        const certificate: ICertificate = approvalDocument.participantCertificateUploadRequests.find(
+            (cert : ICertificate) => cert._id == certificateId
+        );
+
+         if (!certificate) {
+            throw new Error("Certificate request not found within the approval document.");
+        }
+
+        if(certificate.createdBy === approvedBy) {
+            throw new Error("Certificate request cannot be approved by the same user who created it.");
+        }
+
+        const participantId = approvalDocument.participantId;
+
         try{
-            // Find the approval request containing the certificate request
-            const approvalDocument = await this.approvalsCollection.findOne({
-                "participantCertificateUploadRequests._id": certObjectId
-            });
-
-            if (!approvalDocument) {
-                throw new Error("Approval Document not found.");
-            }
-
-             // Extract the specific certificate from request list
-            const certificate = approvalDocument.participantCertificateUploadRequests.find(
-                (cert : ICertificate) => cert._id == certificateId
-            );
-
-             if (!certificate) {
-                throw new Error("Certificate request not found within the approval document.");
-            }
-
-            const participantId = approvalDocument.participantId;
-
             // Move the certificate request to the approved collection
             await this.moveToApprovedCollection(certificate, participantId, approvedBy);
 
         } catch (e: unknown) {
             this._logger.error(`Unable to approve certificate: ${(e as Error).message}`);
-            throw new UnableToUpdateCertError("Unable to approve certificate");
+            throw new UnableToUpdateCertError("Unable to approve certificate: " + (e as Error).message);
         }
 
     }
@@ -371,8 +398,13 @@ export class MongoCertsRepo implements ICertRepo {
         const participantIds = approvalDocuments.map((doc) => doc.participantId);
         this._logger.info("participantIds:", participantIds);
 
-        // Extract the specific certificates from request list
+        // Extract the certificates
         const certificates = approvalDocuments.flatMap(doc => doc.participantCertificateUploadRequests);
+
+        // createdBy and approvedBy should not be the same
+        if(certificates.some(cert => cert.createdBy === approvedBy)) {
+            throw new Error("Certificate request cannot be approved by the same user who created it.");
+        }
 
         this._logger.info("certificates:", certificates);
 
@@ -387,6 +419,19 @@ export class MongoCertsRepo implements ICertRepo {
 
     async deleteCertificateRequest(certificateId: string, participantId: string): Promise<void> {
         // Remove from cert request
+        const cert = await this.approvalsCollection.findOne({
+            participantId: participantId,
+            "participantCertificateUploadRequests._id": new ObjectId(certificateId)
+        });
+
+        if (!cert) {
+            throw new CertNotFoundError("Certificate not found");
+        }
+
+        if(cert.participantCertificateUploadRequests.some((cert: ICertificate) => cert.createdBy === cert.approvedBy)) {
+            throw new Error("Certificate request cannot be deleted by the same user who approved it.");
+        }
+
         await this.approvalsCollection.updateOne(
             { participantId: participantId },
             { $pull: { participantCertificateUploadRequests: { _id: new ObjectId(certificateId) } } }
@@ -396,6 +441,33 @@ export class MongoCertsRepo implements ICertRepo {
             );
             throw new UnableToDeleteCertError(
                 "Unable to delete certificate request"
+            );
+        });
+    }
+
+    async bulkDeleteCertificateRequests(certificateIds: string[]): Promise<void> {
+        const certObjectIds = certificateIds.map((id) => new ObjectId(id));
+
+        const certs = await this.approvalsCollection.find(
+            { "participantCertificateUploadRequests._id": { $in: certObjectIds } },
+            { projection: { participantId: 1 } }
+        ).toArray();
+
+        if(certs.some((cert: any) =>
+            cert.participantCertificateUploadRequests.some((cert: ICertificate) =>
+                cert.createdBy === cert.approvedBy))) {
+            throw new Error("Certificate request cannot be deleted by the same user who approved it.");
+        }
+
+        await this.approvalsCollection.updateMany(
+            {},
+            { $pull: { participantCertificateUploadRequests: { _id: { $in: certObjectIds } } } } as any
+        ).catch((e: unknown) => {
+            this._logger.error(
+                `Unable to delete certificate requests: ${(e as Error).message}`
+            );
+            throw new UnableToDeleteCertError(
+                "Unable to delete certificate requests"
             );
         });
     }

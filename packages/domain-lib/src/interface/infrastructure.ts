@@ -31,13 +31,15 @@
 
 "use strict";
 
-import {ICertificate, ICertificateRequest} from "../types";
+import {ICertificate, ICertificateRequest, IPublicKeyInfo} from "../types";
 
 export interface ICertRepo {
     init(): Promise<void>;
     destroy(): Promise<void>;
 
     getAllCertificates(): Promise<ICertificate[]>;
+    getAllPublicKeys(): Promise<IPublicKeyInfo[]>;
+
     getCertificateByParticipantId(participantId: string): Promise<ICertificate | null>;
     getCertificateByObjectId(objectId: string): Promise<ICertificate | null>;
     getCertificateRequests(): Promise<ICertificateRequest[]>;
@@ -52,6 +54,7 @@ export interface ICertRepo {
     bulkApproveCertificates(certificateIds: string[], approvedBy: string): Promise<void>;
 
     deleteCertificateRequest(certificateId: string, participantId: string): Promise<void>;
+    bulkDeleteCertificateRequests(certificateIds: string[]): Promise<void>;
 
     isAllCertificatesUniqueParticipants(certificateIds: string[]): Promise<boolean>;
 }

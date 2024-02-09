@@ -68,3 +68,8 @@ export interface ICertificateRequest {
     participantCertificateUploadRequests: ICertificate[];
     createdDate: Date;
 }
+
+export interface IPublicKeyInfo {
+    participantId: string;
+    publicKey: string;
+}

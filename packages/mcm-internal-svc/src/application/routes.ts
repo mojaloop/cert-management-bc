@@ -87,7 +87,7 @@ export class ExpressRoutes {
 
         this._mainRouter.get(
             "/certs/download/:certificateId",
-            this._downloadPublicCertificate.bind(this)
+            this._downloadPublicKey.bind(this)
         );
 
         this._mainRouter.post(
@@ -109,6 +109,11 @@ export class ExpressRoutes {
         this._mainRouter.post(
             "/certs/:_id/reject/:participantId",
             this._rejectCertificateRequest.bind(this)
+        );
+
+        this._mainRouter.post(
+            "/certs/bulkreject",
+            this._bulkRejectCertificateRequest.bind(this)
         );
     }
 
@@ -143,16 +148,17 @@ export class ExpressRoutes {
     }
 
     private _validateCertFilename(cert_id: string, cert_file: Express.Multer.File): boolean {
-        // filename should be cert_id-pub.pem
+        // filename should be cert_id.cer
+        const allowed_ext = ["cer", "pem", "crt"];
         const filename = cert_file.originalname;
         const filename_parts = filename.split(".");
         if (filename_parts.length != 2) {
             return false;
         }
-        if (filename_parts[0] != cert_id + "-pub") {
+        if (filename_parts[0] != cert_id) {
             return false;
         }
-        if (filename_parts[1] != "pem") {
+        if (!allowed_ext.includes(filename_parts[1])) {
             return false;
         }
         return true;
@@ -164,7 +170,6 @@ export class ExpressRoutes {
     ): Promise<void> {
         const participantId = req.params.participantId;
         this._logger.info(`Fetch Public Certificate [${participantId}]`);
-
 
         try {
             const cert = await this._certsRepo.getCertificateByParticipantId(participantId);
@@ -208,7 +213,7 @@ export class ExpressRoutes {
         }
     }
 
-    private async _downloadPublicCertificate(
+    private async _downloadPublicKey(
         req: express.Request,
         res: express.Response
     ): Promise<void> {
@@ -225,10 +230,10 @@ export class ExpressRoutes {
                 return;
             }
 
-            const fileName = `${certificateId}-pub.pem`;
+            const fileName = `${certificateId}.pem`;
             res.setHeader("Content-Type", "application/x-pem-file");
             res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
-            res.send(cert.cert);
+            res.send(cert.publicKey);
         } catch (error: unknown) {
             this._logger.error(`Error downloading certificate: ${(error as Error).message}`);
             res.status(500).json({ error: "Internal server error" });
@@ -255,8 +260,8 @@ export class ExpressRoutes {
             }
 
             if(this._validateCertFilename(participantId, req.file) == false) {
-                this._logger.debug(`Invalid file uploaded. use '${participantId}-pub.pem' as filename. ` );
-                res.status(400).json({ status: "error", msg: `Invalid file uploaded. use '${participantId}-pub.pem' as filename. ` });
+                this._logger.debug(`Invalid file uploaded. use '${participantId}.(cer/crt/pem)' as filename. ` );
+                res.status(400).json({ status: "error", msg: `Invalid file uploaded. use '${participantId}.(cer/crt/pem)' as filename. ` });
                 return;
             }
 
@@ -284,13 +289,19 @@ export class ExpressRoutes {
                 signatureAlgorithm : this.getCertCommonName(pkijsCert.signatureAlgorithm.algorithmId),
                 extensions : {},
             };
+            const publicKeyInfo = pkijsCert.subjectPublicKeyInfo;
+            // Assuming publicKeyInfo is obtained as shown in the previous steps
+            const spkiBuffer = publicKeyInfo.toSchema().toBER(); // Serializes the public key to DER-encoded ArrayBuffer
+
+            // Convert the public key to PEM format
+            const publicKeyPem = this.convertToPem(spkiBuffer, "PUBLIC KEY");
 
             const newCertificate: ICertificate = {
                 _id: null,
                 participantId: participantId,
                 type: "PUBLIC",
                 cert: cert,
-                publicKey: "",
+                publicKey: publicKeyPem,
                 certInfo: certInfo,
                 description: null,
                 createdBy: req.securityContext!.username!,
@@ -342,7 +353,7 @@ export class ExpressRoutes {
         req: express.Request,
         res: express.Response
     ): Promise<void> {
-        this._logger.debug("Received request to bulk approve adding certificate");
+        this._logger.debug("Received to approve bulk certificate");
 
         const certificateIds = req.body.certificateIds ?? null;
         if(!certificateIds) {
@@ -399,6 +410,30 @@ export class ExpressRoutes {
         }
     }
 
+    private async _bulkRejectCertificateRequest(
+        req: express.Request,
+        res: express.Response
+    ): Promise<void> {
+        this._logger.debug("Received bulk reject certificate requests");
+
+        const certificateIds = req.body.certificateIds ?? null;
+        if(!certificateIds) {
+            res.status(400).json({ status: "error", msg: "certificateIds is required" });
+            return;
+        }
+
+        try {
+            await this._certsRepo.bulkDeleteCertificateRequests(certificateIds);
+            res.status(200).send();
+        } catch (error: unknown) {
+            this._logger.error(`Error bulk rejecting certificate requests: ${(error as Error).message}`);
+            res.status(500).json({
+                status: "error",
+                msg: (error as Error).message
+            });
+        }
+    }
+
     private _validateCertificateData(pem: string): boolean {
         try {
             const parsedCert = this._parseCertificate(pem);
@@ -411,6 +446,7 @@ export class ExpressRoutes {
             return false;
         }
     }
+
 
     private _parseCertificate(pem: string): Certificate | null  {
         // Convert PEM to ArrayBuffer,
@@ -426,14 +462,23 @@ export class ExpressRoutes {
         // Parse the certificate
         const asn1 = asn1js.fromBER(bytes.buffer);
         if (asn1.offset === -1) {
-            console.error("Cannot parse the certificate");
-            return null;
+            this._logger.error("Error cannot parse certificate content");
+            throw new Error("Error cannot parse certificate content");
         }
 
         // Try catch block to handle parsing errors?
         const certificate = new Certificate({ schema: asn1.result });
 
         return certificate;
+    }
+
+    private convertToPem(buffer: ArrayBuffer, type: string): string {
+        const base64 = Buffer.from(buffer).toString("base64");
+        const formattedBase64 = base64.replace(/(.{64})/g, "$1\n");
+
+        const pem = `-----BEGIN ${type}-----\n${formattedBase64}\n-----END ${type}-----\n`;
+
+        return pem;
     }
 
     private getCertCommonName(oid: string): string {

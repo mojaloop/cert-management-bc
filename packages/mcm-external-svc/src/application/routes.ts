@@ -51,6 +51,8 @@ export class ExpressRoutes {
         this._certsAgg = certsAgg;
         this._certsRepo = certsRepo;
 
+        this._mainRouter.get("/certs", this._certsGetAllPublicKey.bind(this));
+
         this._mainRouter.get(
             "/certs/:participantId",
             this._certsGetCertificate.bind(this)
@@ -59,6 +61,25 @@ export class ExpressRoutes {
 
     get MainRouter(): express.Router {
         return this._mainRouter;
+    }
+
+    private async _certsGetAllPublicKey(
+        req: express.Request,
+        res: express.Response
+    ): Promise<void> {
+        this._logger.debug("Received request to Fetch All Public Keys");
+
+        try {
+            const publicKeys = await this._certsRepo.getAllPublicKeys();
+
+            res.status(200).send(publicKeys);
+        } catch (error: unknown) {
+            this._logger.error(`Error getting all Public Keys: ${(error as Error).message}`);
+            res.status(404).json({
+                status: "error",
+                msg: (error as Error).message
+            });
+        }
     }
 
     private async _certsGetCertificate(
