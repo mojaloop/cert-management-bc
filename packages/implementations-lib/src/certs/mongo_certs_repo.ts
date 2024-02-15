@@ -450,7 +450,7 @@ export class MongoCertsRepo implements ICertRepo {
 
         const certs = await this.approvalsCollection.find(
             { "participantCertificateUploadRequests._id": { $in: certObjectIds } },
-            { projection: { participantId: 1 } }
+            { projection: { participantId: 1, participantCertificateUploadRequests: 1 } }
         ).toArray();
 
         if(certs.some((cert: any) =>
