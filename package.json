@@ -1,6 +1,6 @@
 {
     "name": "@mojaloop/cert-management-bc",
-    "version": "0.0.2",
+    "version": "0.0.4",
     "description": "To manage the certs of DFSPs for fspiop-signature and connection management",
     "license": "Apache-2.0",
     "homepage": "https://github.com/mojaloop/cert-management-bc",

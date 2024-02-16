@@ -1,6 +1,6 @@
 {
     "name": "@mojaloop/cert-management-bc-mcm-internal-svc",
-    "version": "0.0.2",
+    "version": "0.0.4",
     "description": "Internal MCM service for Hub Operator/Admins",
     "license": "Apache-2.0",
     "homepage": "https://github.com/mojaloop/cert-management-bc",
