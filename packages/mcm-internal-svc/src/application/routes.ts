@@ -30,7 +30,14 @@
 import express from "express";
 import { ILogger } from "@mojaloop/logging-bc-public-types-lib";
 import { IConfigurationClient } from "@mojaloop/platform-configuration-bc-public-types-lib";
-import { CertificateAggregate, ICertRepo, ICertificate, ICertificateInfo } from "@mojaloop/cert-management-bc-domain-lib";
+import {
+    CertificateAggregate,
+    CertificateRequestState,
+    CertType,
+    ICertRepo,
+    ICertificate,
+    ICertificateInfo,
+} from "@mojaloop/cert-management-bc-domain-lib";
 
 import multer from "multer";
 import {
@@ -81,8 +88,13 @@ export class ExpressRoutes {
         );
 
         this._mainRouter.get(
+            "/certs/requests/pending",
+            this._getPendingCertificateRequests.bind(this)
+        );
+
+        this._mainRouter.get(
             "/certs/:participantId",
-            this._getCertificate.bind(this)
+            this._getCertificateByParticipantId.bind(this)
         );
 
         this._mainRouter.get(
@@ -164,7 +176,7 @@ export class ExpressRoutes {
         return true;
     }
 
-    private async _getCertificate(
+    private async _getCertificateByParticipantId(
         req: express.Request,
         res: express.Response
     ): Promise<void> {
@@ -213,6 +225,24 @@ export class ExpressRoutes {
         }
     }
 
+    private async _getPendingCertificateRequests(
+        req: express.Request,
+        res: express.Response
+    ): Promise<void> {
+        this._logger.info("Fetch Pending Certificate Requests");
+
+        try {
+            const certRequests = await this._certsRepo.getPendingCertificateRequests();
+            res.status(200).send(certRequests);
+        } catch (error: unknown) {
+            this._logger.error(`Error getting pending certificate requests: ${(error as Error).message}`);
+            res.status(500).json({
+                status: "error",
+                msg: (error as Error).message
+            });
+        }
+    }
+
     private async _downloadPublicKey(
         req: express.Request,
         res: express.Response
@@ -230,7 +260,7 @@ export class ExpressRoutes {
                 return;
             }
 
-            const fileName = `${certificateId}.pem`;
+            const fileName = `${cert.participantId}.pem`;
             res.setHeader("Content-Type", "application/x-pem-file");
             res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
             res.send(cert.publicKey);
@@ -299,16 +329,20 @@ export class ExpressRoutes {
             const newCertificate: ICertificate = {
                 _id: null,
                 participantId: participantId,
-                type: "PUBLIC",
+                type: CertType.PUBLIC,
                 cert: cert,
                 publicKey: publicKeyPem,
                 certInfo: certInfo,
                 description: null,
                 createdBy: req.securityContext!.username!,
                 createdDate: new Date(),
+                requestState: CertificateRequestState.CREATED,
                 approved: false,
                 approvedBy: null,
                 approvedDate: null,
+                rejected: false,
+                rejectedBy: null,
+                rejectedDate: null,
                 lastUpdated: Date.now()
             };
 
@@ -399,7 +433,7 @@ export class ExpressRoutes {
         }
 
         try {
-            await this._certsRepo.deleteCertificateRequest(certificateId, participantId);
+            await this._certsRepo.rejectCertificate(certificateId, req.securityContext!.username!);
             res.status(200).send();
         } catch (error: unknown) {
             this._logger.error(`Error approving adding certificate: ${(error as Error).message}`);
@@ -423,7 +457,7 @@ export class ExpressRoutes {
         }
 
         try {
-            await this._certsRepo.bulkDeleteCertificateRequests(certificateIds);
+            await this._certsRepo.bulkRejectCertificates(certificateIds, req.securityContext!.username!);
             res.status(200).send();
         } catch (error: unknown) {
             this._logger.error(`Error bulk rejecting certificate requests: ${(error as Error).message}`);

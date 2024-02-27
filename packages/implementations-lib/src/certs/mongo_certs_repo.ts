@@ -44,6 +44,7 @@ import {
     CertNotFoundError,
 } from "../errors";
 import {
+    CertificateRequestState,
     ICertRepo,
     ICertificate,
     ICertificateRequest,
@@ -194,6 +195,27 @@ export class MongoCertsRepo implements ICertRepo {
                 );
                 throw new UnableToGetCertError(
                     "Unable to get certificate requests"
+                );
+            });
+
+        return certs.map((cert) => this.mapToCertRequest(cert));
+    }
+
+    async getPendingCertificateRequests(): Promise<ICertificateRequest[]> {
+        const certs = await this.approvalsCollection
+            .find({
+                "participantCertificateUploadRequests.approved": false,
+                "participantCertificateUploadRequests.rejected": false,
+                "participantCertificateUploadRequests.requestState": CertificateRequestState.CREATED
+            })
+            .sort({ createdDate: 1 })
+            .toArray()
+            .catch((e: unknown) => {
+                this._logger.error(
+                    `Unable to get pending certificate requests: ${(e as Error).message}`
+                );
+                throw new UnableToGetCertError(
+                    "Unable to get pending certificate requests"
                 );
             });
 
@@ -417,6 +439,137 @@ export class MongoCertsRepo implements ICertRepo {
 
     }
 
+    async rejectCertificate(
+        certificateId: string,
+        rejectedBy: string
+    ): Promise<void> {
+        const certObjectId = new ObjectId(certificateId);
+        // Find the approval request containing the certificate request
+        const tobeRejectDocument = await this.approvalsCollection.findOne({
+            "participantCertificateUploadRequests._id": certObjectId
+        });
+
+        if (!tobeRejectDocument) {
+            throw new Error("Document not found.");
+        }
+
+        // Extract the specific certificate from request list
+        const certificate: ICertificate = tobeRejectDocument.participantCertificateUploadRequests.find(
+            (cert : ICertificate) => cert._id == certificateId
+        );
+
+        if (!certificate) {
+            throw new Error("Certificate request not found within the approval document.");
+        }
+
+        if(certificate.createdBy === rejectedBy) {
+            throw new Error("Certificate request cannot be rejected by the same user who created it.");
+        }
+
+        const participantId = tobeRejectDocument.participantId;
+
+        await this.approvalsCollection.updateOne(
+            { participantId: participantId },
+            {
+                $set: {
+                    "participantCertificateUploadRequests.$[elem].requestState": CertificateRequestState.REJECTED,
+                    "participantCertificateUploadRequests.$[elem].rejected": true,
+                    "participantCertificateUploadRequests.$[elem].rejectedDate": new Date(),
+                    "participantCertificateUploadRequests.$[elem].rejectedBy": rejectedBy
+                }
+            },
+            { arrayFilters: [{"elem._id": certObjectId}] }
+        ).catch((e: unknown) => {
+            this._logger.error(
+                `Unable to reject certificate: ${(e as Error).message}`
+            );
+            throw new UnableToUpdateCertError("Unable to reject certificate");
+        });
+    }
+
+    async bulkRejectCertificates(
+        certificateIds: string[],
+        rejectedBy: string
+    ): Promise<void> {
+        const certObjectIds = certificateIds.map((id) => new ObjectId(id));
+        const pipeline = [
+            {
+                $match: {
+                    "participantCertificateUploadRequests._id": { $in: certObjectIds }
+                }
+            },
+            {
+                $project: {
+                    participantId: 1,
+                    participantCertificateUploadRequests: {
+                        $filter: {
+                            input: "$participantCertificateUploadRequests",
+                            as: "request",
+                            cond: { $in: ["$$request._id", certObjectIds] }
+                        }
+                    }
+                }
+            }
+        ];
+
+        const approvalDocuments = await this.approvalsCollection.aggregate(pipeline).toArray();
+
+        if (approvalDocuments.length === 0) {
+            throw new Error("Approval Document not found.");
+        }
+
+        const participantIds = approvalDocuments.map((doc) => doc.participantId);
+
+        // Extract the certificates
+        const certificates = approvalDocuments.flatMap(doc => doc.participantCertificateUploadRequests);
+
+        // createdBy and rejectedBy should not be the same
+        if(certificates.some(cert => cert.createdBy === rejectedBy)) {
+            throw new Error("Certificate request cannot be rejected by the same user who created it.");
+        }
+
+        if (certificates.length === 0) {
+            throw new Error("Certificate request not found within the approval document.");
+        }
+        const bulkOps = certObjectIds.map(certObjectId => ({
+            updateOne: {
+                filter: { "participantCertificateUploadRequests._id": certObjectId },
+                update: {
+                    $set: {
+                        "participantCertificateUploadRequests.$.requestState": CertificateRequestState.REJECTED,
+                        "participantCertificateUploadRequests.$.rejected": true,
+                        "participantCertificateUploadRequests.$.rejectedDate": new Date(),
+                        "participantCertificateUploadRequests.$.rejectedBy": rejectedBy
+                    }
+                }
+            }
+        }));
+
+        await this.approvalsCollection.bulkWrite(bulkOps).catch(e => {
+            this._logger.error(`Unable to bulk reject certificates: ${e.message}`);
+            throw new UnableToUpdateCertError("Unable to bulk reject certificates");
+        });
+
+        // for (const participantId of participantIds) {
+        //     await this.approvalsCollection.updateOne(
+        //         { participantId: participantId },
+        //         {
+        //             $set: {
+        //                 "participantCertificateUploadRequests.$[elem].rejected": true,
+        //                 "participantCertificateUploadRequests.$[elem].rejectedDate": new Date(),
+        //                 "participantCertificateUploadRequests.$[elem].rejectedBy": rejectedBy
+        //             }
+        //         },
+        //         {
+        //             arrayFilters: [{"elem._id": { $in: certObjectIds }}]
+        //         }
+        //     ).catch((e: unknown) => {
+        //         this._logger.error(`Unable to reject certificate: ${(e as Error).message}`);
+        //         throw new UnableToUpdateCertError("Unable to bulk reject certificate");
+        //     });
+        // }
+    }
+
     async deleteCertificateRequest(certificateId: string, participantId: string): Promise<void> {
         // Remove from cert request
         const cert = await this.approvalsCollection.findOne({
@@ -543,6 +696,7 @@ export class MongoCertsRepo implements ICertRepo {
         await this.certsCollection.insertOne({
             ...certificate,
             _id,
+            requestState: CertificateRequestState.APPROVED,
             approved: true,
             approvedDate: new Date(),
             approvedBy: approvedBy
@@ -579,6 +733,7 @@ export class MongoCertsRepo implements ICertRepo {
             return {
                 ...cert,
                 _id,
+                requestState: CertificateRequestState.APPROVED,
                 approved: true,
                 approvedDate: new Date(),
                 approvedBy: approvedBy,

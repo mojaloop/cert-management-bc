@@ -43,6 +43,7 @@ export interface ICertRepo {
     getCertificateByParticipantId(participantId: string): Promise<ICertificate | null>;
     getCertificateByObjectId(objectId: string): Promise<ICertificate | null>;
     getCertificateRequests(): Promise<ICertificateRequest[]>;
+    getPendingCertificateRequests(): Promise<ICertificateRequest[]>;
     getCertificateRequestsByParticipantId(participantId: string): Promise<ICertificateRequest | null>;
     getCertificateRequestsByParticipantIds(participantIds: string[]): Promise<ICertificateRequest[]>;
 
@@ -52,6 +53,9 @@ export interface ICertRepo {
 
     approveCertificate(certificateId: string, approvedBy: string): Promise<void>;
     bulkApproveCertificates(certificateIds: string[], approvedBy: string): Promise<void>;
+
+    rejectCertificate(certificateId: string, rejectedBy: string): Promise<void>;
+    bulkRejectCertificates(certificateIds: string[], rejectedBy: string): Promise<void>;
 
     deleteCertificateRequest(certificateId: string, participantId: string): Promise<void>;
     bulkDeleteCertificateRequests(certificateIds: string[]): Promise<void>;

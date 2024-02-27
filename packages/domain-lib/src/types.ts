@@ -31,7 +31,16 @@
 
 "use strict";
 
-export type ICertType = "PUBLIC" | "PRIVATE";
+export enum CertType {
+  "PUBLIC" = "PUBLIC",
+  "PRIVATE" = "PRIVATE", // not used
+}
+
+export enum CertificateRequestState {
+  "CREATED" = "CREATED",
+  "APPROVED" = "APPROVED",
+  "REJECTED" = "REJECTED"
+}
 
 export interface ICertificateInfo {
     subject: string;
@@ -47,11 +56,13 @@ export interface ICertificateInfo {
 export interface ICertificate {
     _id: string | null;
     participantId: string;
-    type: ICertType;
+    type: CertType;
     cert: string;
     publicKey: string;
     certInfo?: ICertificateInfo;
     description: string | null;
+
+    requestState: CertificateRequestState;
 
     createdBy: string;
     createdDate: Date;
@@ -59,6 +70,10 @@ export interface ICertificate {
     approved: boolean;
     approvedBy: string | null;
     approvedDate: Date | null;
+
+    rejected: boolean;
+    rejectedBy: string | null;
+    rejectedDate: Date | null;
 
     lastUpdated: number;
 }
