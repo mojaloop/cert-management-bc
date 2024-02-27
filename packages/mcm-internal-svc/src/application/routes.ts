@@ -30,8 +30,10 @@
 import express from "express";
 import { ILogger } from "@mojaloop/logging-bc-public-types-lib";
 import { IConfigurationClient } from "@mojaloop/platform-configuration-bc-public-types-lib";
+
 import {
     CertificateAggregate,
+    CertificatesPrivileges,
     CertificateRequestState,
     CertType,
     ICertRepo,
@@ -42,6 +44,8 @@ import {
 import multer from "multer";
 import {
     CallSecurityContext,
+    ForbiddenError,
+    IAuthorizationClient,
     ITokenHelper,
 } from "@mojaloop/security-bc-public-types-lib";
 import { Certificate } from "pkijs";
@@ -62,6 +66,7 @@ export class ExpressRoutes {
     private _certsRepo: ICertRepo;
 
     private _mainRouter = express.Router();
+    private _authorizationClient: IAuthorizationClient;
 
     constructor(
         configClient: IConfigurationClient,
@@ -69,12 +74,14 @@ export class ExpressRoutes {
         logger: ILogger,
         tokenHelper: ITokenHelper,
         certsRepo: ICertRepo,
+        authorizationClient: IAuthorizationClient
     ) {
         this._configClient = configClient;
         this._logger = logger;
         this._tokenHelper = tokenHelper;
         this._certsAgg = certsAgg;
         this._certsRepo = certsRepo;
+        this._authorizationClient = authorizationClient;
 
         const storage = multer.memoryStorage();
         const uploadfile = multer({ storage: storage });
@@ -184,6 +191,7 @@ export class ExpressRoutes {
         this._logger.info(`Fetch Public Certificate [${participantId}]`);
 
         try {
+            this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.VIEW_CERTIFICATES);
             const cert = await this._certsRepo.getCertificateByParticipantId(participantId);
             res.status(200).send(cert);
         } catch (error: unknown) {
@@ -202,6 +210,7 @@ export class ExpressRoutes {
         this._logger.info("Fetch Certificate Requests: ", req.query.participantId);
 
         try {
+            this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.VIEW_CERTIFICATES);
             const participantId = req.query.participantId as string;
             if(participantId){
                 const certRequest = await this._certsRepo.getCertificateRequestsByParticipantId(participantId);
@@ -247,6 +256,8 @@ export class ExpressRoutes {
         req: express.Request,
         res: express.Response
     ): Promise<void> {
+        this._logger.debug("Received request to download public key");
+
         const certificateId = req.params.certificateId;
         if (!certificateId) {
             res.status(400).json({ error: "certificateId is required" });
@@ -254,6 +265,7 @@ export class ExpressRoutes {
         }
 
         try {
+            this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.VIEW_CERTIFICATES);
             const cert = await this._certsRepo.getCertificateByObjectId(certificateId);
             if (!cert) {
                 res.status(404).json({ error: "Certificate not found" });
@@ -283,6 +295,7 @@ export class ExpressRoutes {
         }
 
         try {
+            this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.CREATE_CERTIFICATE_REQUEST);
             if (!req.file) {
                 this._logger.debug("No file uploaded");
                 res.status(422).json({ status: "error", msg: "No file uploaded" });
@@ -372,6 +385,7 @@ export class ExpressRoutes {
         }
 
         try {
+            this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.APPROVE_CERTIFICATE_REQUEST);
             await this._certsRepo.approveCertificate(certificateId, req.securityContext!.username!);
             res.status(200).send();
         } catch (error: unknown) {
@@ -396,6 +410,7 @@ export class ExpressRoutes {
         }
 
         try {
+            this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.APPROVE_CERTIFICATE_REQUEST);
             const isUnique = await this._certsRepo.isAllCertificatesUniqueParticipants(certificateIds);
             this._logger.debug(`isUnique: ${isUnique}`);
             if(!isUnique){
@@ -418,6 +433,7 @@ export class ExpressRoutes {
         req: express.Request,
         res: express.Response
     ): Promise<void> {
+        this._logger.debug("Received request to reject adding certificate");
 
         const certificateId = req.params._id ?? null;
         const participantId = req.params.participantId ?? null;
@@ -433,8 +449,10 @@ export class ExpressRoutes {
         }
 
         try {
+            this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.REJECT_CERTIFICATE_REQUEST);
             await this._certsRepo.rejectCertificate(certificateId, req.securityContext!.username!);
             res.status(200).send();
+          
         } catch (error: unknown) {
             this._logger.error(`Error approving adding certificate: ${(error as Error).message}`);
             res.status(500).json({
@@ -449,6 +467,7 @@ export class ExpressRoutes {
         res: express.Response
     ): Promise<void> {
         this._logger.debug("Received bulk reject certificate requests");
+        this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.REJECT_CERTIFICATE_REQUEST);
 
         const certificateIds = req.body.certificateIds ?? null;
         if(!certificateIds) {
@@ -533,6 +552,17 @@ export class ExpressRoutes {
         };
 
         return oidMap[oid]|| oid; // return Return the OID itself if a mapping is not found
+    }
+
+    private _enforcePrivilege(secCtx: CallSecurityContext, privilegeId: string): void {
+        for (const roleId of secCtx.platformRoleIds) {
+            if (this._authorizationClient.roleHasPrivilege(roleId, privilegeId)) {
+                return;
+            }
+        }
+        const error = new ForbiddenError(`Required privilege "${privilegeId}" not held by caller`);
+        this._logger.isWarnEnabled() && this._logger.warn(error.message);
+        throw error;
     }
 
 }

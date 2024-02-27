@@ -38,13 +38,13 @@ import {KafkaLogger} from "@mojaloop/logging-bc-client-lib";
 
 import {IConfigurationClient} from "@mojaloop/platform-configuration-bc-public-types-lib";
 import {IMessageProducer} from "@mojaloop/platform-shared-lib-messaging-types-lib";
-import {MLKafkaJsonProducer} from "@mojaloop/platform-shared-lib-nodejs-kafka-client-lib";
+import {MLKafkaJsonConsumer, MLKafkaJsonProducerOptions, MLKafkaJsonProducer} from "@mojaloop/platform-shared-lib-nodejs-kafka-client-lib";
 import * as util from "util";
 import {Server} from "net";
-import {CertificateAggregate, ICertRepo} from "@mojaloop/cert-management-bc-domain-lib";
+import {CertificateAggregate, ICertRepo, CertificatesPrivilegesDefinition } from "@mojaloop/cert-management-bc-domain-lib";
 import {MongoCertsRepo} from "@mojaloop/cert-management-bc-implementations-lib";
-import {ITokenHelper} from "@mojaloop/security-bc-public-types-lib";
-import {TokenHelper} from "@mojaloop/security-bc-client-lib";
+import {IAuthorizationClient, ITokenHelper} from "@mojaloop/security-bc-public-types-lib";
+import {AuthenticatedHttpRequester, AuthorizationClient, TokenHelper} from "@mojaloop/security-bc-client-lib";
 
 const APP_NAME = "mcm-internal-svc";
 const BC_NAME = "cert-management-bc";
@@ -56,9 +56,14 @@ const SVC_DEFAULT_HTTP_PORT = 3200;
 
 const AUTH_N_SVC_BASEURL = process.env["AUTH_N_SVC_BASEURL"] || "http://localhost:3201";
 const AUTH_N_SVC_JWKS_URL = process.env["AUTH_N_SVC_JWKS_URL"] || `${AUTH_N_SVC_BASEURL}/.well-known/jwks.json`;
-// const AUTH_N_SVC_TOKEN_URL = AUTH_N_SVC_BASEURL + "/token"; // TODO this should not be known here, libs that use the base should add the suffix
+const AUTH_N_SVC_TOKEN_URL = AUTH_N_SVC_BASEURL + "/token"; // TODO this should not be known here, libs that use the base should add the suffix
 const AUTH_N_TOKEN_ISSUER_NAME = process.env["AUTH_N_TOKEN_ISSUER_NAME"] || "mojaloop.vnext.dev.default_issuer";
 const AUTH_N_TOKEN_AUDIENCE = process.env["AUTH_N_TOKEN_AUDIENCE"] || "mojaloop.vnext.dev.default_audience";
+
+const AUTH_Z_SVC_BASEURL = process.env["AUTH_Z_SVC_BASEURL"] || "http://localhost:3202";
+
+const SVC_CLIENT_ID = process.env["SVC_CLIENT_ID"] || "certs-management-bc-mcm-internal-svc";
+const SVC_CLIENT_SECRET = process.env["SVC_CLIENT_SECRET"] || "superServiceSecret";
 
 const KAFKA_URL = process.env["KAFKA_URL"] || "localhost:9092";
 const KAFKA_LOGS_TOPIC = process.env["KAFKA_LOGS_TOPIC"] || "logs";
@@ -88,11 +93,13 @@ export class Service {
     static configClient: IConfigurationClient;
     static startupTimer: NodeJS.Timeout;
     static certificateAggregate: CertificateAggregate;
+    static authorizationClient: IAuthorizationClient;
 
     static async start(
         logger?: ILogger,
         messageProducer?: IMessageProducer,
         certsRepo?: ICertRepo,
+        authorizationClient?: IAuthorizationClient,
         // configProvider?: IConfigProvider,
     ): Promise<void> {
         console.log(`Service starting with PID: ${process.pid}`);
@@ -154,6 +161,35 @@ export class Service {
             CERT_DIR
         );
 
+        // authorization client
+        if (!authorizationClient) {
+            // create the instance of IAuthenticatedHttpRequester
+            const authRequester = new AuthenticatedHttpRequester(logger, AUTH_N_SVC_TOKEN_URL);
+            authRequester.setAppCredentials(SVC_CLIENT_ID, SVC_CLIENT_SECRET);
+
+            const messageConsumer = new MLKafkaJsonConsumer(
+                {
+                    kafkaBrokerList: KAFKA_URL,
+                    kafkaGroupId: `${BC_NAME}_${APP_NAME}_authz_client`
+                }, logger.createChild("authorizationClientConsumer")
+            );
+
+            // setup privileges - bootstrap app privs and get priv/role associations
+            authorizationClient = new AuthorizationClient(
+                BC_NAME, APP_NAME, APP_VERSION,
+                AUTH_Z_SVC_BASEURL, logger.createChild("AuthorizationClient"),
+                authRequester,
+                messageConsumer
+            );
+
+            authorizationClient.addPrivilegesArray(CertificatesPrivilegesDefinition);
+            await (authorizationClient as AuthorizationClient).bootstrap(true);
+            await (authorizationClient as AuthorizationClient).fetch();
+            // init message consumer to automatically update on role changed events
+            await (authorizationClient as AuthorizationClient).init();
+       }
+        this.authorizationClient = authorizationClient;
+
         await this.setupExpress();
 
         // remove startup timeout
@@ -166,7 +202,7 @@ export class Service {
             this.app.use(express.json()); // for parsing application/json
             this.app.use(express.urlencoded({extended: true})); // for parsing application/x-www-form-urlencoded
 
-            const routes = new ExpressRoutes(this.configClient, this.certificateAggregate, this.logger, this.tokenHelper, this.certsRepo);
+            const routes = new ExpressRoutes(this.configClient, this.certificateAggregate, this.logger, this.tokenHelper, this.certsRepo, this.authorizationClient);
 
             // Add health and metrics http routes - before others (to avoid authZ middleware)
             this.app.get("/health", (_req: express.Request, res: express.Response) => {

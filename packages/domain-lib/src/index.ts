@@ -35,3 +35,4 @@
 export * from "./aggregate";
 export * from "./types";
 export * from "./interface/infrastructure";
+export * from "./priviledges";
