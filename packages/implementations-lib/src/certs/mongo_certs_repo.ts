@@ -549,25 +549,6 @@ export class MongoCertsRepo implements ICertRepo {
             this._logger.error(`Unable to bulk reject certificates: ${e.message}`);
             throw new UnableToUpdateCertError("Unable to bulk reject certificates");
         });
-
-        // for (const participantId of participantIds) {
-        //     await this.approvalsCollection.updateOne(
-        //         { participantId: participantId },
-        //         {
-        //             $set: {
-        //                 "participantCertificateUploadRequests.$[elem].rejected": true,
-        //                 "participantCertificateUploadRequests.$[elem].rejectedDate": new Date(),
-        //                 "participantCertificateUploadRequests.$[elem].rejectedBy": rejectedBy
-        //             }
-        //         },
-        //         {
-        //             arrayFilters: [{"elem._id": { $in: certObjectIds }}]
-        //         }
-        //     ).catch((e: unknown) => {
-        //         this._logger.error(`Unable to reject certificate: ${(e as Error).message}`);
-        //         throw new UnableToUpdateCertError("Unable to bulk reject certificate");
-        //     });
-        // }
     }
 
     async deleteCertificateRequest(certificateId: string, participantId: string): Promise<void> {
