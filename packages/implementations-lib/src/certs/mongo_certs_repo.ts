@@ -202,13 +202,24 @@ export class MongoCertsRepo implements ICertRepo {
     }
 
     async getPendingCertificateRequests(): Promise<ICertificateRequest[]> {
-        const certs = await this.approvalsCollection
-            .find({
-                "participantCertificateUploadRequests.approved": false,
-                "participantCertificateUploadRequests.rejected": false,
-                "participantCertificateUploadRequests.requestState": CertificateRequestState.CREATED
-            })
-            .sort({ createdDate: 1 })
+            const pipeline = [
+                {
+                    $addFields: {
+                        participantCertificateUploadRequests: {
+                            $filter: {
+                                input: "$participantCertificateUploadRequests",
+                                as: "request",
+                                cond: {
+                                    $eq: ["$$request.requestState", CertificateRequestState.CREATED]
+                                }
+                            }
+                        }
+                    }
+                }
+            ];
+
+            const certs = await this.approvalsCollection
+            .aggregate(pipeline)
             .toArray()
             .catch((e: unknown) => {
                 this._logger.error(
@@ -218,8 +229,8 @@ export class MongoCertsRepo implements ICertRepo {
                     "Unable to get pending certificate requests"
                 );
             });
+            return certs.map((cert) => this.mapToCertRequest(cert as WithId<Document>));
 
-        return certs.map((cert) => this.mapToCertRequest(cert));
     }
 
     async getCertificateRequestsByParticipantId(
@@ -411,14 +422,11 @@ export class MongoCertsRepo implements ICertRepo {
 
         const approvalDocuments = await this.approvalsCollection.aggregate(pipeline).toArray();
 
-        this._logger.info("approvalDocuments:", approvalDocuments);
-
         if (approvalDocuments.length === 0) {
             throw new Error("Approval Document not found.");
         }
 
         const participantIds = approvalDocuments.map((doc) => doc.participantId);
-        this._logger.info("participantIds:", participantIds);
 
         // Extract the certificates
         const certificates = approvalDocuments.flatMap(doc => doc.participantCertificateUploadRequests);
@@ -427,8 +435,6 @@ export class MongoCertsRepo implements ICertRepo {
         if(certificates.some(cert => cert.createdBy === approvedBy)) {
             throw new Error("Certificate request cannot be approved by the same user who created it.");
         }
-
-        this._logger.info("certificates:", certificates);
 
         if (certificates.length === 0) {
             throw new Error("Certificate request not found within the approval document.");
@@ -517,8 +523,6 @@ export class MongoCertsRepo implements ICertRepo {
         if (approvalDocuments.length === 0) {
             throw new Error("Approval Document not found.");
         }
-
-        const participantIds = approvalDocuments.map((doc) => doc.participantId);
 
         // Extract the certificates
         const certificates = approvalDocuments.flatMap(doc => doc.participantCertificateUploadRequests);
