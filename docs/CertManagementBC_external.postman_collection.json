@@ -1,0 +1,78 @@
+{
+	"info": {
+		"_postman_id": "38ab2626-6e2b-4ea4-a7f2-c0892adf9a51",
+		"name": "CertManagementBC_external",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "27422024"
+	},
+	"item": [
+		{
+			"name": "Fetch All Public Keys",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/certs",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"certs"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Fetch Public Certificate by Participant ID",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/certs/:participantId",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"certs",
+						":participantId"
+					],
+					"variable": [
+						{
+							"key": "participantId",
+							"value": "greenbank"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3220",
+			"type": "string"
+		}
+	]
+}
