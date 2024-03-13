@@ -33,7 +33,7 @@
     "dependencies": {
         "@mojaloop/logging-bc-client-lib": "^0.5.6",
         "@mojaloop/logging-bc-public-types-lib": "~0.5.4",
-        "@mojaloop/platform-configuration-bc-client-lib": "^0.5.3",
+        "@mojaloop/platform-configuration-bc-client-lib": "^0.5.4",
         "@mojaloop/platform-configuration-bc-public-types-lib": "^0.5.2",
         "mongodb": "^6.3.0"
     },
