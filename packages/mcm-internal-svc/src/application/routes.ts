@@ -39,6 +39,7 @@ import {
     ICertRepo,
     ICertificate,
     ICertificateInfo,
+    BulkApprovalRequestResults,
 } from "@mojaloop/cert-management-bc-domain-lib";
 
 import multer from "multer";
@@ -411,15 +412,26 @@ export class ExpressRoutes {
 
         try {
             this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.APPROVE_CERTIFICATE_REQUEST);
-            const isUnique = await this._certsRepo.isAllCertificatesUniqueParticipants(certificateIds);
-            this._logger.debug(`isUnique: ${isUnique}`);
-            if(!isUnique){
-                res.status(400).json({ status: "error", msg: "Bulk Approval requires all participants to be unique" });
-                return;
+             const messages: BulkApprovalRequestResults[] = [];
+
+            for (const certificateId of certificateIds) {
+                try{
+                    await this._certsRepo.approveCertificate(certificateId, req.securityContext!.username!);
+                     messages.push({
+                         reqId: certificateId,
+                         status: "success",
+                         message: `Successfully approved request id: ${certificateId}.`,
+                     });
+                }catch (error: unknown) {
+                    messages.push({
+                        reqId: certificateId,
+                        status: "error",
+                        message: `Failed to approve request Id: ${certificateId}. ${(error as Error).message}`,
+                    });
+                }
             }
 
-            await this._certsRepo.bulkApproveCertificates(certificateIds, req.securityContext!.username!);
-            res.status(200).send();
+            res.status(200).send(messages);
         } catch (error: unknown) {
             this._logger.error(`Error bulk approving certificate requests: ${(error as Error).message}`);
             res.status(500).json({
@@ -452,7 +464,7 @@ export class ExpressRoutes {
             this._enforcePrivilege(req.securityContext!, CertificatesPrivileges.REJECT_CERTIFICATE_REQUEST);
             await this._certsRepo.rejectCertificate(certificateId, req.securityContext!.username!);
             res.status(200).send();
-          
+
         } catch (error: unknown) {
             this._logger.error(`Error approving adding certificate: ${(error as Error).message}`);
             res.status(500).json({
@@ -476,8 +488,25 @@ export class ExpressRoutes {
         }
 
         try {
-            await this._certsRepo.bulkRejectCertificates(certificateIds, req.securityContext!.username!);
-            res.status(200).send();
+            const messages: BulkApprovalRequestResults[] = [];
+            for (const certificateId of certificateIds) {
+                try{
+                    await this._certsRepo.rejectCertificate(certificateId, req.securityContext!.username!);
+                    messages.push({
+                        reqId: certificateId,
+                        status: "success",
+                        message: `Successfully rejected request id: ${certificateId}.`,
+                    });
+                }catch (error: unknown) {
+                    messages.push({
+                        reqId: certificateId,
+                        status: "error",
+                        message: `Failed to reject request Id: ${certificateId}. ${(error as Error).message}`,
+                    });
+                }
+            }
+
+            res.status(200).send(messages);
         } catch (error: unknown) {
             this._logger.error(`Error bulk rejecting certificate requests: ${(error as Error).message}`);
             res.status(500).json({

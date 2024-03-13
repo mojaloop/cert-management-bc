@@ -88,3 +88,9 @@ export interface IPublicKeyInfo {
     participantId: string;
     publicKey: string;
 }
+
+export declare type BulkApprovalRequestResults = {
+  reqId: string;
+  status: "success" | "error";
+  message: string;
+}
