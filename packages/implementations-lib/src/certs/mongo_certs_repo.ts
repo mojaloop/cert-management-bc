@@ -687,11 +687,14 @@ export class MongoCertsRepo implements ICertRepo {
             approvedBy: approvedBy
         });
 
-
-        // Remove from approvalsCollection
         await this.approvalsCollection.updateOne(
-            { participantId: participantId },
-            { $pull: { participantCertificateUploadRequests: { _id: certificate._id } } } as any
+            { participantId: participantId, "participantCertificateUploadRequests._id": _id },
+            { $set: {
+                "participantCertificateUploadRequests.$.requestState": CertificateRequestState.APPROVED,
+                "participantCertificateUploadRequests.$.approved": true,
+                "participantCertificateUploadRequests.$.approvedDate": new Date(),
+                "participantCertificateUploadRequests.$.approvedBy": approvedBy
+            } }
         );
     }
 
@@ -700,11 +703,6 @@ export class MongoCertsRepo implements ICertRepo {
         participantIds: string[],
         approvedBy: string
     ): Promise<void> {
-
-        const validCertIds = certificates
-            .map((cert) => cert._id)
-            .filter((id): id is string => id !== null)
-            .map((id) => new ObjectId(id));
 
         await this.certsCollection.deleteMany({ participantId: { $in: participantIds } });
 
@@ -727,10 +725,17 @@ export class MongoCertsRepo implements ICertRepo {
 
         await this.certsCollection.insertMany(certsToInsert);
 
-        await this.approvalsCollection.updateMany(
-            { participantId: { $in: participantIds } },
-            { $pull: { participantCertificateUploadRequests: { _id: { $in: validCertIds } } } } as any
-        );
+        await Promise.all(certsToInsert.map(cert => {
+            return this.approvalsCollection.updateOne(
+                { participantId: { $in: participantIds }, "participantCertificateUploadRequests._id": cert._id },
+                { $set: {
+                    "participantCertificateUploadRequests.$.requestState": CertificateRequestState.APPROVED,
+                    "participantCertificateUploadRequests.$.approved": true,
+                    "participantCertificateUploadRequests.$.approvedDate": new Date(),
+                    "participantCertificateUploadRequests.$.approvedBy": approvedBy
+                } }
+            );
+        }));
     }
 
 
