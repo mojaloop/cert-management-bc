@@ -38,8 +38,8 @@
         "dep:update": "ncu -u"
     },
     "dependencies": {
-        "@mojaloop/cert-management-bc-domain-lib": "*",
         "@mojaloop/cert-management-bc-public-types-lib": "*",
+        "@mojaloop/cert-management-bc-domain-lib": "*",
         "@mojaloop/logging-bc-client-lib": "^0.5.6",
         "@mojaloop/platform-configuration-bc-client-lib": "^0.5.4",
         "@mojaloop/platform-configuration-bc-public-types-lib": "^0.5.2",

@@ -53,9 +53,9 @@
         "typescript": "^4.9.5"
     },
     "workspaces": [
+        "packages/public-types-lib",
         "packages/*",
-        "packages/implementations-lib",
-        "packages/public-types-lib"
+        "packages/implementations-lib"
     ],
     "engines": {
         "node": ">=20.10.0"
