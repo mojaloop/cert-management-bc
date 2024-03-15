@@ -54,7 +54,8 @@
     },
     "workspaces": [
         "packages/*",
-        "packages/implementations-lib"
+        "packages/implementations-lib",
+        "packages/public-types-lib"
     ],
     "engines": {
         "node": ">=20.10.0"
