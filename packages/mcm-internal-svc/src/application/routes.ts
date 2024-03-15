@@ -32,15 +32,13 @@ import { ILogger } from "@mojaloop/logging-bc-public-types-lib";
 import { IConfigurationClient } from "@mojaloop/platform-configuration-bc-public-types-lib";
 
 import {
-    CertificateAggregate,
     CertificatesPrivileges,
     CertificateRequestState,
     CertType,
-    ICertRepo,
     ICertificate,
     ICertificateInfo,
     BulkApprovalRequestResults,
-} from "@mojaloop/cert-management-bc-domain-lib";
+} from "@mojaloop/cert-management-bc-public-types-lib";
 
 import multer from "multer";
 import {
@@ -51,6 +49,7 @@ import {
 } from "@mojaloop/security-bc-public-types-lib";
 import { Certificate } from "pkijs";
 import * as asn1js from "asn1js";
+import {CertificateAggregate, ICertRepo} from "@mojaloop/cert-management-bc-domain-lib";
 
 // Extend express request to include our security fields
 declare module "express-serve-static-core" {

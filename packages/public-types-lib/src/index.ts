@@ -32,5 +32,6 @@
  "use strict";
 
 
-export * from "./aggregate";
-export * from "./interface/infrastructure";
+export * from "./errors";
+export * from "./types";
+export * from "./priviledges";

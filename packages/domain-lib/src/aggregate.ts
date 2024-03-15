@@ -30,15 +30,8 @@
 import { ILogger } from "@mojaloop/logging-bc-public-types-lib";
 import { IConfigurationClient } from "@mojaloop/platform-configuration-bc-public-types-lib";
 import { IMessageProducer } from "@mojaloop/platform-shared-lib-messaging-types-lib";
-import path from "path";
-import fs from "fs";
-import {
-    CertNotFoundError,
-    CertReadingError,
-    CertStoringError,
-} from "./errors";
 import {ICertRepo} from "./interface/infrastructure";
-import {ICertificate} from "./types";
+import {CertReadingError, ICertificate} from "@mojaloop/cert-management-bc-public-types-lib";
 
 export class CertificateAggregate {
     private _logger: ILogger;
@@ -61,23 +54,6 @@ export class CertificateAggregate {
         this._certsRepo = certsRepo;
     }
 
-    // We don't need this function for now
-    // public async listCertificates(): Promise<string[]> {
-    //     try {
-    //         const files = await fs.promises.readdir(this._cert_dir);
-    //         const certs = files.map((file) => {
-    //             const participantId = file.split("-pub.")[0];
-    //             return participantId;
-    //         });
-    //         return certs;
-    //
-    //     } catch (error: unknown) {
-    //         const errMsg = `Error Listing Certificates: ${(error as Error).message}`;
-    //         this._logger.error(errMsg);
-    //         throw new CertReadingError(errMsg);
-    //     }
-    // }
-
     public async getCertificate(participantId: string): Promise<ICertificate | null> {
         try {
             this._logger.info(`Fetching Certificate [${participantId}]`);
@@ -89,84 +65,4 @@ export class CertificateAggregate {
             throw new CertReadingError(errMsg);
         }
     }
-    //
-    // public async storeCertificate(participantId: string, cert: string): Promise<void> {
-    //     try {
-    //         await fs.promises.writeFile(filePath, cert);
-    //
-    //         // const certCreatedPayload: CertCreatedEvtPayload = {
-    //         //     participantId: participantId,
-    //         // };
-    //         // const event = new CertCreatedEvt(certCreatedPayload);
-    //         // await this._messageProducer.send(event);
-    //
-    //     } catch (error: unknown) {
-    //         const errMsg = `Error Storing certificate: ${(error as Error).message}`;
-    //         this._logger.error(errMsg);
-    //         throw new CertStoringError("Error Storing Certificate");
-    //     }
-    // }
-    //
-    // public async updateCertificate(
-    //     participantId: string,
-    //     cert: string
-    // ): Promise<void> {
-    //     if (!this._validateparticipantId(participantId)) {
-    //         const errMsg = `Invalid certificate ID: ${participantId}`;
-    //         this._logger.error(errMsg);
-    //         throw new participantIdInvalidError(errMsg);
-    //     }
-    //
-    //     const filePath = path.join(this._cert_dir, `${participantId}-pub.pem`);
-    //     if (!fs.existsSync(filePath)) {
-    //         const errMsg = "Certificate does not exist";
-    //         this._logger.error(errMsg);
-    //         throw new CertNotFoundError(errMsg);
-    //     }
-    //
-    //     try {
-    //         await fs.promises.writeFile(filePath, cert);
-    //
-    //         // const certChangedPayload: CertChangedEvtPayload = {
-    //         //     participantId: participantId,
-    //         // };
-    //         // const event = new CertChangedEvt(certChangedPayload);
-    //         // await this._messageProducer.send(event);
-    //
-    //     } catch (error: unknown) {
-    //         const errMsg = `Error Updating certificate: ${(error as Error).message}`;
-    //         this._logger.error(errMsg);
-    //         throw new CertStoringError("Error Updating Certificate");
-    //     }
-    // }
-    //
-    // public async deleteCertificate(participantId: string): Promise<void> {
-    //     if (!this._validateparticipantId(participantId)) {
-    //         const errMsg = `Invalid certificate ID: ${participantId}`;
-    //         this._logger.error(errMsg);
-    //         throw new participantIdInvalidError(errMsg);
-    //     }
-    //
-    //     const filePath = path.join(this._cert_dir, `${participantId}-pub.pem`);
-    //     if (!fs.existsSync(filePath)) {
-    //         const errMsg = "Certificate does not exist";
-    //         this._logger.error(errMsg);
-    //         throw new CertNotFoundError(errMsg);
-    //     }
-    //
-    //     try {
-    //         await fs.promises.unlink(filePath);
-    //
-    //         // const certDeletedPayload: CertDeletedEvtPayload = {
-    //         //     participantId: participantId,
-    //         // };
-    //         // const event = new CertDeletedEvt(certDeletedPayload);
-    //         // await this._messageProducer.send(event);
-    //
-    //     } catch (error: unknown) {
-    //         const errMsg = `Error Deleting certificate: ${(error as Error).message}`;
-    //         this._logger.error(errMsg);
-    //         throw new CertStoringError("Error Deleting Certificate");
-    //     }
-    // }
 }
