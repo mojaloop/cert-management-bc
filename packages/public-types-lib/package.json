@@ -1,10 +1,10 @@
 {
-    "name": "@mojaloop/cert-management-bc-domain-lib",
-    "version": "0.0.4",
-    "description": "To manage the certs of DFSPs for fspiop-signature and connection management",
+    "name": "@mojaloop/cert-management-bc-public-types-lib",
+    "version": "0.0.1",
+    "description": "Types and Enums to be used across internal vNext services",
     "license": "Apache-2.0",
     "homepage": "https://github.com/mojaloop/cert-management-bc",
-    "private": true,
+    "private": false,
     "bugs": {
         "url": "https://github.com/mojaloop/cert-management-bc/issues#readme"
     },
@@ -31,7 +31,6 @@
         "test:unit": "jest --passWithNoTests --testMatch **/test/unit/**/*.test.ts"
     },
     "dependencies": {
-        "@mojaloop/cert-management-bc-public-types-lib": "*",
         "@mojaloop/logging-bc-client-lib": "^0.5.6",
         "@mojaloop/logging-bc-public-types-lib": "~0.5.4",
         "@mojaloop/platform-configuration-bc-client-lib": "^0.5.4",

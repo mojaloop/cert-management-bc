@@ -31,7 +31,7 @@
 
 "use strict";
 
-import {ICertificate, ICertificateRequest, IPublicKeyInfo} from "../types";
+import {ICertificate, ICertificateRequest, IPublicKeyInfo} from "@mojaloop/cert-management-bc-public-types-lib";
 
 export interface ICertRepo {
     init(): Promise<void>;

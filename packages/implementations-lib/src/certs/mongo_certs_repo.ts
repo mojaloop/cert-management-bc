@@ -45,11 +45,11 @@ import {
 } from "../errors";
 import {
     CertificateRequestState,
-    ICertRepo,
     ICertificate,
     ICertificateRequest,
     IPublicKeyInfo
-} from "@mojaloop/cert-management-bc-domain-lib";
+} from "@mojaloop/cert-management-bc-public-types-lib";
+import {ICertRepo} from "@mojaloop/cert-management-bc-domain-lib";
 
 export class MongoCertsRepo implements ICertRepo {
     private readonly _logger: ILogger;

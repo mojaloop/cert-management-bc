@@ -38,13 +38,14 @@ import {KafkaLogger} from "@mojaloop/logging-bc-client-lib";
 
 import {IConfigurationClient} from "@mojaloop/platform-configuration-bc-public-types-lib";
 import {IMessageProducer} from "@mojaloop/platform-shared-lib-messaging-types-lib";
-import {MLKafkaJsonConsumer, MLKafkaJsonProducerOptions, MLKafkaJsonProducer} from "@mojaloop/platform-shared-lib-nodejs-kafka-client-lib";
+import {MLKafkaJsonConsumer, MLKafkaJsonProducer} from "@mojaloop/platform-shared-lib-nodejs-kafka-client-lib";
 import * as util from "util";
 import {Server} from "net";
-import {CertificateAggregate, ICertRepo, CertificatesPrivilegesDefinition } from "@mojaloop/cert-management-bc-domain-lib";
+import {CertificatesPrivilegesDefinition } from "@mojaloop/cert-management-bc-public-types-lib";
 import {MongoCertsRepo} from "@mojaloop/cert-management-bc-implementations-lib";
 import {IAuthorizationClient, ITokenHelper} from "@mojaloop/security-bc-public-types-lib";
 import {AuthenticatedHttpRequester, AuthorizationClient, TokenHelper} from "@mojaloop/security-bc-client-lib";
+import {CertificateAggregate, ICertRepo} from "@mojaloop/cert-management-bc-domain-lib";
 
 const APP_NAME = "mcm-internal-svc";
 const BC_NAME = "cert-management-bc";
